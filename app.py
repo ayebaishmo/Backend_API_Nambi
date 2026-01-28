@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify
 from config import genai, MODEL_NAME
 from content_fetcher import fetch_multiple_pages
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 SITE_URLS = [
     "https://everything-ug.netlify.app/",

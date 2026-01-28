@@ -10,6 +10,7 @@ google-generativeai = "*"
 requests = "*"
 beautifulsoup4 = "*"
 playwright = "*"
+flask-cors = "*"
 
 [dev-packages]
 
