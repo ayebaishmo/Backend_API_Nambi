@@ -5,9 +5,9 @@ from content_fetcher import fetch_multiple_pages
 app = Flask(__name__)
 
 SITE_URLS = [
-    "https://everything-uganda-website.vercel.app/",
-    "https://everything-uganda-website.vercel.app/facts",
-    "https://everything-uganda-website.vercel.app/culture",
+    "https://everything-ug.netlify.app/",
+    "https://everything-ug.netlify.app/facts"
+    
 ]
 
 print("Loading website content....")
