@@ -1,12 +1,12 @@
 import requests
-from bs4 import BeatifulSoup
+from bs4 import BeautifulSoup
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; CompanyChatbot/1.0)"
 }
 
 def extract_visible_text(html: str) -> str:
-    soup = BeatifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
 
     # Remove scripts 
     for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
