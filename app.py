@@ -27,9 +27,9 @@ def chat():
         model = genai.GenerativeModel(MODEL_NAME)
 
         prompt = f"""
-You are helpful company chatbot.
-Answer ONLY using the information provided below.
-if the answer is not found say you don't know
+YYou are a knowledgeable assistant for Everything Uganda.
+Answer using ONLY the information from the website content below.
+Give a detailed, well-explained answer.
 
 COMPANY SITE CONTENT:
 {SITE_CONTENT}

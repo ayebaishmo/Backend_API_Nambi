@@ -1,27 +1,17 @@
-import requests
-from bs4 import BeautifulSoup
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; EverythingBot/1.0)"
-}
-
-
-def extract_visible_text(html):
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Remove unwanted tags
-    for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
-        tag.decompose()
-
-    text = soup.get_text(separator="\n")
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return "\n".join(lines)
+from playwright.sync_api import sync_playwright
 
 
 def fetch_page(url):
-    response = requests.get(url, headers=HEADERS, timeout=15)
-    response.raise_for_status()
-    return extract_visible_text(response.text)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(url, timeout=30000)
+        page.wait_for_load_state("networkidle")
+
+        content = page.inner_text("body")
+
+        browser.close()
+        return content
 
 
 def fetch_multiple_pages(urls):

@@ -9,6 +9,7 @@ python-dotenv = "*"
 google-generativeai = "*"
 requests = "*"
 beautifulsoup4 = "*"
+playwright = "*"
 
 [dev-packages]
 
