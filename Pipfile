@@ -11,6 +11,7 @@ beautifulsoup4 = "*"
 playwright = "*"
 flask = "*"
 flask-cors = "*"
+gunicorn = "*"
 
 [dev-packages]
 
