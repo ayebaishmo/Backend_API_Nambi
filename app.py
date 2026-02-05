@@ -1,101 +1,18 @@
-from flask import Flask, request, jsonify
-from config import genai, MODEL_NAME
-from content_fetcher import fetch_multiple_pages
-from flask_cors import CORS
-from flasgger import Swagger
+from flask import Flask
+from extensions import cors, swagger
+from routes.chat import chat_bp
 
-app = Flask(__name__)
-CORS(app)
+def create_app():
+    app = Flask(__name__)
 
-swagger = Swagger(app)
+    cors.init_app(app)
+    swagger.init_app(app)
 
-SITE_URLS = [
-    "https://everything-ug.netlify.app/",
-    "https://everything-ug.netlify.app/facts",
-    "https://everything-ug.netlify.app/culture",
-    "https://everything-ug.netlify.app/top-cities/kampala",
-    "https://everything-ug.netlify.app/religion",
-    "https://everything-ug.netlify.app/travel-tips",
-    "https://everything-ug.netlify.app/destinations",
-    "https://everything-ug.netlify.app/activities",
-    "https://everything-ug.netlify.app/about",
-    "https://everything-ug.netlify.app/where-to-stay",
-    "https://everything-ug.netlify.app/insights",
-    "https://everything-ug.netlify.app/impact",
-    "https://everything-ug.netlify.app/holiday-booking"
-]
+    app.register_blueprint(chat_bp, url_prefix="/api")
 
-print("Loading website content....")
-SITE_CONTENT = fetch_multiple_pages(SITE_URLS)
-print("Website Content loaded")
-
-
-@app.route("/api/chat", methods=["POST"])
-def chat():
-    """
-    Chat with Nambi (Everything Uganda chatbot)
-    ---
-    tags:
-      - Chatbot
-    parameters:
-      - name: body
-        in: body
-        required: true
-        schema:
-          type: object
-          properties:
-            question:
-              type: string
-              example: "Tell me about Kampala"
-    responses:
-      200:
-        description: Bot response
-        schema:
-          type: object
-          properties:
-            answer:
-              type: string
-              example: "Kampala is the capital city of Uganda..."
-      400:
-        description: Missing question
-      500:
-        description: Server error
-    """
-
-    data = request.get_json()
-
-    if not data or "question" not in data:
-        return jsonify({"error": "Question is required"}), 400
-
-    question = data["question"]
-
-    try:
-        model = genai.GenerativeModel(MODEL_NAME)
-
-        prompt = f"""
-You are a chatbot assistant for Everything Uganda.
-Your name is Nambi.
-Answer using this information plus including all your knowledeg base.
-
-COMPANY SITE CONTENT:
-{SITE_CONTENT}
-
-USER QUESTION:
-{question}
-"""
-
-        response = model.generate_content(prompt)
-
-        return jsonify({
-            "answer": response.text
-        })
-
-    except Exception as e:
-        return jsonify({
-            "error": "Failed to generate response try again later",
-            "details": str(e)
-        }), 500
+    return app
 
 
 if __name__ == "__main__":
+    app = create_app()
     app.run(debug=True)
