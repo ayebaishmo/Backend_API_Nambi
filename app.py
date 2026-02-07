@@ -3,6 +3,8 @@ from extensions import cors, swagger, db, bcrypt
 from routes.chat import chat_bp
 from routes.admin_auth import admin_auth_bp
 from routes.admin_login import admin_bp
+from routes.itinerary_admin import itinerary_admin_bp
+
 
 
 def create_app():
@@ -17,7 +19,12 @@ def create_app():
 
     app.register_blueprint(chat_bp, url_prefix="/api")
     app.register_blueprint(admin_auth_bp, url_prefix="/api")
-    app.register_blueprint(admin_bp, url_Prefix="/api")
+
+    app.register_blueprint(admin_bp, url_prefix="/api")
+    app.register_blueprint(itinerary_admin_bp, url_prefix="/api")
+
+ 
+
 
     return app
 
