@@ -24,9 +24,9 @@ def create_app():
     app.register_blueprint(itinerary_admin_bp, url_prefix="/api")
 
  
-
-
     return app
+
+app = create_app()
 
 if __name__ == "__main__":
     app = create_app()
