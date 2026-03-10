@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from models.admin import Admin
+from middleware.auth import generate_token
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
@@ -40,8 +41,11 @@ def admin_login():
     if not admin or not admin.check_password(data["password"]):
         return jsonify({"error": "Invalid credentials"}), 401
 
+    token = generate_token(admin.id)
+
     return jsonify({
         "message": "Login successful",
+        "token": token,
         "admin": {
             "id": admin.id,
             "name": admin.name,

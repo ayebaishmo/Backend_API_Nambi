@@ -59,3 +59,6 @@ typing_extensions==4.15.0
 uritemplate==4.2.0
 urllib3==2.6.3
 Werkzeug==3.1.5
+PyJWT==2.10.1
+googletrans==4.0.0rc1
+openai-whisper==20231117
