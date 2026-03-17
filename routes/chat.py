@@ -19,19 +19,18 @@ _content_loaded = False
 _loading_lock = threading.Lock()
 
 SITE_URLS = [
-    "https://everything-ug.netlify.app/",
-    "https://everything-ug.netlify.app/facts",
-    "https://everything-ug.netlify.app/culture",
-    "https://everything-ug.netlify.app/top-cities/kampala",
-    "https://everything-ug.netlify.app/religion",
-    "https://everything-ug.netlify.app/travel-tips",
-    "https://everything-ug.netlify.app/destinations",
-    "https://everything-ug.netlify.app/activities",
-    "https://everything-ug.netlify.app/about",
-    "https://everything-ug.netlify.app/where-to-stay",
-    "https://everything-ug.netlify.app/insights",
-    "https://everything-ug.netlify.app/impact",
-    "https://everything-ug.netlify.app/holiday-booking"
+    "https://www.everythinguganda.com//",
+    "https://www.everythinguganda.com/facts",
+    "https://www.everythinguganda.com/culture",
+    "https://www.everythinguganda.com/top-cities/kampala",
+    "https://www.everythinguganda.com/religion",
+    "https://www.everythinguganda.com/travel-tips",
+    "https://www.everythinguganda.com/destinations",
+    "https://www.everythinguganda.com/holiday-types?type=birding-holidays",
+    "https://www.everythinguganda.com/about",
+    "https://www.everythinguganda.com/where-to-stay",
+    "https://www.everythinguganda.com/insights",
+    "https://www.everythinguganda.com/impact",
 ]
 
 def load_site_content():
