@@ -158,16 +158,18 @@ class MultilingualChatService:
             Welcome message in specified language
         """
         welcome_messages = {
-            'en': "Hello! I'm Nambi, your Virtual Consultant for Everything Uganda. I'm here to help you discover the Pearl of Africa through curated travel experiences, cultural insights, and essential services.",
-            'fr': "Bonjour! Je suis Nambi, votre consultant virtuel pour Everything Uganda. Je suis là pour vous aider à découvrir la Perle de l'Afrique à travers des expériences de voyage organisées, des aperçus culturels et des services essentiels.",
-            'de': "Hallo! Ich bin Nambi, Ihr virtueller Berater für Everything Uganda. Ich bin hier, um Ihnen zu helfen, die Perle Afrikas durch kuratierte Reiseerlebnisse, kulturelle Einblicke und wesentliche Dienstleistungen zu entdecken.",
-            'es': "¡Hola! Soy Nambi, tu consultor virtual para Everything Uganda. Estoy aquí para ayudarte a descubrir la Perla de África a través de experiencias de viaje seleccionadas, conocimientos culturales y servicios esenciales.",
-            'sw': "Habari! Mimi ni Nambi, mshauri wako wa mtandao wa Everything Uganda. Niko hapa kukusaidia kugundua Lulu ya Afrika kupitia uzoefu wa usafiri uliochaguliwa, maarifa ya kitamaduni, na huduma muhimu.",
-            'zh-cn': "你好！我是Nambi，您的Everything Uganda虚拟顾问。我在这里帮助您通过精选的旅行体验、文化见解和基本服务发现非洲明珠。",
-            'ar': "مرحبا! أنا نامبي، مستشارك الافتراضي لـ Everything Uganda. أنا هنا لمساعدتك في اكتشاف لؤلؤة أفريقيا من خلال تجارب السفر المنسقة والرؤى الثقافية والخدمات الأساسية.",
-            'pt': "Olá! Sou Nambi, seu consultor virtual para Everything Uganda. Estou aqui para ajudá-lo a descobrir a Pérola da África através de experiências de viagem selecionadas, insights culturais e serviços essenciais.",
-            'it': "Ciao! Sono Nambi, il tuo consulente virtuale per Everything Uganda. Sono qui per aiutarti a scoprire la Perla d'Africa attraverso esperienze di viaggio curate, approfondimenti culturali e servizi essenziali.",
-            'ru': "Здравствуйте! Я Намби, ваш виртуальный консультант по Everything Uganda. Я здесь, чтобы помочь вам открыть для себя Жемчужину Африки через тщательно подобранные туристические впечатления, культурные идеи и основные услуги."
+            'en': "Hello! I'm Nambi, your Virtual Travel Assistant for Everything Uganda. I'm here to help you discover the Pearl of Africa through curated travel experiences, cultural insights, and essential services.",
+            'fr': "Bonjour! Je suis Nambi, votre Assistante Virtuelle de Voyage pour Everything Uganda. Je suis là pour vous aider à découvrir la Perle de l'Afrique.",
+            'de': "Hallo! Ich bin Nambi, Ihre virtuelle Reiseassistentin für Everything Uganda. Ich bin hier, um Ihnen zu helfen, die Perle Afrikas zu entdecken.",
+            'es': "¡Hola! Soy Nambi, tu Asistente Virtual de Viajes para Everything Uganda. Estoy aquí para ayudarte a descubrir la Perla de África.",
+            'sw': "Habari! Mimi ni Nambi, Msaidizi wako wa Usafiri wa Mtandao wa Everything Uganda. Niko hapa kukusaidia kugundua Lulu ya Afrika.",
+            'zh-cn': "你好！我是Nambi，您的Everything Uganda虚拟旅行助手。我在这里帮助您发现非洲明珠。",
+            'ar': "مرحبا! أنا نامبي، مساعدتك الافتراضية للسفر لـ Everything Uganda. أنا هنا لمساعدتك في اكتشاف لؤلؤة أفريقيا.",
+            'pt': "Olá! Sou Nambi, sua Assistente Virtual de Viagens para Everything Uganda. Estou aqui para ajudá-lo a descobrir a Pérola da África.",
+            'it': "Ciao! Sono Nambi, la tua Assistente Virtuale di Viaggio per Everything Uganda. Sono qui per aiutarti a scoprire la Perla d'Africa.",
+            'ru': "Здравствуйте! Я Намби, ваш виртуальный помощник по путешествиям для Everything Uganda. Я здесь, чтобы помочь вам открыть Жемчужину Африки.",
+            'ko': "안녕하세요! 저는 Nambi입니다, Everything Uganda의 가상 여행 도우미입니다. 아프리카의 진주를 발견하도록 도와드리겠습니다.",
+            'ja': "こんにちは！私はNambi、Everything Ugandaのバーチャル旅行アシスタントです。アフリカの真珠を発見するお手伝いをします。"
         }
         
         return welcome_messages.get(language, welcome_messages['en'])

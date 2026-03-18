@@ -236,6 +236,65 @@ def get_models():
     return jsonify(VoiceService.get_model_info()), 200
 
 
+@voice_bp.route("/voice/speak", methods=["POST"])
+def text_to_speech():
+    """
+    Convert text to speech (for welcome message narration)
+    ---
+    tags:
+      - Voice
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            text:
+              type: string
+              example: "Hello! I'm Nambi, your Virtual Travel Assistant"
+            language:
+              type: string
+              example: "en"
+    responses:
+      200:
+        description: Audio file (mp3)
+      400:
+        description: Bad request
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get('text'):
+            return jsonify({'error': 'text is required'}), 400
+
+        text = data.get('text')
+        language = data.get('language', 'en')
+
+        # Use gTTS (Google Text-to-Speech) - free
+        from gtts import gTTS
+        import io
+
+        tts = gTTS(text=text, lang=language, slow=False)
+
+        # Save to bytes buffer
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+
+        from flask import send_file
+        return send_file(
+            audio_buffer,
+            mimetype='audio/mpeg',
+            as_attachment=False,
+            download_name='speech.mp3'
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @voice_bp.route("/voice/chat", methods=["POST"])
 @rate_limit
 def voice_chat():
