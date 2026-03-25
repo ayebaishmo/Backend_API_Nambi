@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from gemini import get_gemini_model
-from services.content_fetcher import fetch_multiple_pages
+from services.content_fetcher import fetch_full_site
 from services.session_manager import SessionManager
 from services.cache_manager import CacheManager, cached
 from services.multilingual_chat_service import MultilingualChatService
@@ -18,20 +18,7 @@ _site_content = None
 _content_loaded = False
 _loading_lock = threading.Lock()
 
-SITE_URLS = [
-    "https://www.everythinguganda.com//",
-    "https://www.everythinguganda.com/facts",
-    "https://www.everythinguganda.com/culture",
-    "https://www.everythinguganda.com/top-cities/kampala",
-    "https://www.everythinguganda.com/religion",
-    "https://www.everythinguganda.com/travel-tips",
-    "https://www.everythinguganda.com/destinations",
-    "https://www.everythinguganda.com/holiday-types?type=birding-holidays",
-    "https://www.everythinguganda.com/about",
-    "https://www.everythinguganda.com/where-to-stay",
-    "https://www.everythinguganda.com/insights",
-    "https://www.everythinguganda.com/impact",
-]
+
 
 def load_site_content():
     """Load site content at startup"""
@@ -42,7 +29,7 @@ def load_site_content():
             return _site_content
             
         try:
-            _site_content = fetch_multiple_pages(SITE_URLS)
+            _site_content = fetch_full_site("https://www.everythinguganda.com/")
             _content_loaded = True
         except Exception as e:
             print(f"ERROR: Failed to fetch site content - {type(e).__name__}: {str(e)}")
@@ -109,40 +96,88 @@ def chat():
         
         print(f"User language: {user_language}, Original: '{question}', English: '{english_question}'")
 
+        # Multilingual static responses
+        _suggested_questions = {
+            'en': ["What are the top tourist destinations in Uganda?", "Tell me about accommodation options", "What cultural experiences are available?"],
+            'sw': ["Ni vivutio gani vya utalii nchini Uganda?", "Niambie kuhusu malazi", "Ni uzoefu gani wa kitamaduni unapatikana?"],
+            'fr': ["Quelles sont les meilleures destinations en Ouganda?", "Parlez-moi des options d'hébergement", "Quelles expériences culturelles sont disponibles?"],
+            'de': ["Was sind die besten Reiseziele in Uganda?", "Erzähl mir von Unterkunftsmöglichkeiten", "Welche kulturellen Erlebnisse gibt es?"],
+            'es': ["¿Cuáles son los mejores destinos turísticos en Uganda?", "Háblame de las opciones de alojamiento", "¿Qué experiencias culturales están disponibles?"],
+            'pt': ["Quais são os melhores destinos turísticos em Uganda?", "Fale-me sobre opções de acomodação", "Que experiências culturais estão disponíveis?"],
+            'ar': ["ما هي أفضل الوجهات السياحية في أوغندا؟", "أخبرني عن خيارات الإقامة", "ما هي التجارب الثقافية المتاحة؟"],
+            'it': ["Quali sono le migliori destinazioni turistiche in Uganda?", "Parlami delle opzioni di alloggio", "Quali esperienze culturali sono disponibili?"],
+            'ru': ["Каковы лучшие туристические направления в Уганде?", "Расскажи мне о вариантах проживания", "Какие культурные мероприятия доступны?"],
+            'ko': ["우간다의 최고 관광지는 어디인가요?", "숙박 옵션에 대해 알려주세요", "어떤 문화 체험이 가능한가요?"],
+            'ja': ["ウガンダのトップ観光地はどこですか？", "宿泊オプションについて教えてください", "どんな文化体験ができますか？"],
+            'zh': ["乌干达最好的旅游目的地是哪里？", "告诉我住宿选择", "有哪些文化体验？"],
+            'zh-cn': ["乌干达最好的旅游目的地是哪里？", "告诉我住宿选择", "有哪些文化体验？"],
+            'hi': ["युगांडा में शीर्ष पर्यटन स्थल कौन से हैं?", "आवास विकल्पों के बारे में बताएं", "कौन से सांस्कृतिक अनुभव उपलब्ध हैं?"],
+        }
+
+        _booking_answers = {
+            'en': "Wonderful! To book your Uganda experience, please visit https://www.everythinguganda.com/holiday-booking or contact us directly. Our team will craft the perfect trip for you.",
+            'sw': "Vizuri sana! Ili kuhifadhi uzoefu wako wa Uganda, tafadhali tembelea https://www.everythinguganda.com/holiday-booking au wasiliana nasi moja kwa moja. Timu yetu itakutengenezea safari nzuri.",
+            'fr': "Parfait! Pour réserver votre expérience en Ouganda, visitez https://www.everythinguganda.com/holiday-booking ou contactez-nous directement. Notre équipe créera le voyage parfait pour vous.",
+            'de': "Wunderbar! Um Ihr Uganda-Erlebnis zu buchen, besuchen Sie https://www.everythinguganda.com/holiday-booking oder kontaktieren Sie uns direkt. Unser Team plant die perfekte Reise für Sie.",
+            'es': "¡Maravilloso! Para reservar tu experiencia en Uganda, visita https://www.everythinguganda.com/holiday-booking o contáctanos directamente. Nuestro equipo creará el viaje perfecto para ti.",
+            'pt': "Maravilhoso! Para reservar sua experiência em Uganda, visite https://www.everythinguganda.com/holiday-booking ou entre em contato conosco diretamente.",
+            'ar': "رائع! لحجز تجربتك في أوغندا، يرجى زيارة https://www.everythinguganda.com/holiday-booking أو التواصل معنا مباشرة.",
+            'it': "Meraviglioso! Per prenotare la tua esperienza in Uganda, visita https://www.everythinguganda.com/holiday-booking o contattaci direttamente.",
+            'ru': "Замечательно! Чтобы забронировать ваш опыт в Уганде, посетите https://www.everythinguganda.com/holiday-booking или свяжитесь с нами напрямую.",
+            'ko': "훌륭합니다! 우간다 여행을 예약하려면 https://www.everythinguganda.com/holiday-booking 을 방문하거나 직접 문의하세요.",
+            'ja': "素晴らしい！ウガンダ体験を予約するには、https://www.everythinguganda.com/holiday-booking をご覧いただくか、直接お問い合わせください。",
+            'zh': "太好了！要预订您的乌干达体验，请访问 https://www.everythinguganda.com/holiday-booking 或直接联系我们。",
+            'zh-cn': "太好了！要预订您的乌干达体验，请访问 https://www.everythinguganda.com/holiday-booking 或直接联系我们。",
+            'hi': "बहुत अच्छा! अपना युगांडा अनुभव बुक करने के लिए, कृपया https://www.everythinguganda.com/holiday-booking पर जाएं या हमसे सीधे संपर्क करें।",
+        }
+
+        _booking_questions = {
+            'en': ["What destinations can I visit?", "Tell me about accommodation options", "What activities are available?"],
+            'sw': ["Ni maeneo gani ninaweza kutembelea?", "Niambie kuhusu malazi", "Ni shughuli gani zinapatikana?"],
+            'fr': ["Quelles destinations puis-je visiter?", "Parlez-moi des options d'hébergement", "Quelles activités sont disponibles?"],
+            'de': ["Welche Reiseziele kann ich besuchen?", "Erzähl mir von Unterkunftsmöglichkeiten", "Welche Aktivitäten gibt es?"],
+            'es': ["¿Qué destinos puedo visitar?", "Háblame de las opciones de alojamiento", "¿Qué actividades están disponibles?"],
+            'pt': ["Que destinos posso visitar?", "Fale-me sobre opções de acomodação", "Que atividades estão disponíveis?"],
+            'ar': ["ما هي الوجهات التي يمكنني زيارتها؟", "أخبرني عن خيارات الإقامة", "ما هي الأنشطة المتاحة؟"],
+            'it': ["Quali destinazioni posso visitare?", "Parlami delle opzioni di alloggio", "Quali attività sono disponibili?"],
+            'ru': ["Какие направления я могу посетить?", "Расскажи о вариантах проживания", "Какие мероприятия доступны?"],
+            'ko': ["어떤 목적지를 방문할 수 있나요?", "숙박 옵션에 대해 알려주세요", "어떤 활동이 가능한가요?"],
+            'ja': ["どんな目的地を訪れることができますか？", "宿泊オプションについて教えてください", "どんなアクティビティがありますか？"],
+            'zh': ["我可以参观哪些目的地？", "告诉我住宿选择", "有哪些活动？"],
+            'zh-cn': ["我可以参观哪些目的地？", "告诉我住宿选择", "有哪些活动？"],
+            'hi': ["मैं कौन से गंतव्य देख सकता हूं?", "आवास विकल्पों के बारे में बताएं", "कौन सी गतिविधियां उपलब्ध हैं?"],
+        }
+
+        def get_lang_response(mapping, lang):
+            return mapping.get(lang, mapping['en'])
+
         # Handle initial greeting (check both original and translated)
-        simple_greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "greetings", 
+        simple_greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "greetings",
                            "habari", "jambo", "mambo", "bonjour", "hola", "hallo", "ciao", "olá", "привет", "你好", "مرحبا"]
-        
-        is_greeting = (not english_question or 
-                      english_question.lower().strip() in simple_greetings or 
+
+        is_greeting = (not english_question or
+                      english_question.lower().strip() in simple_greetings or
                       question.lower().strip() in simple_greetings)
-        
+
         if is_greeting:
             welcome_message = MultilingualChatService.get_welcome_message(user_language)
             return jsonify({
                 "answer": welcome_message,
-                "suggested_questions": [
-                    "What are the top tourist destinations in Uganda?",
-                    "Tell me about accommodation options",
-                    "What cultural experiences are available?"
-                ],
+                "suggested_questions": get_lang_response(_suggested_questions, user_language),
                 "action_buttons": [],
                 "booking_buttons": [],
                 "show_booking_prompt": False,
                 "images": [],
                 "quick_replies": []
             })
-        
+
         # Handle booking intent
-        booking_keywords = ["yes please", "yes", "book", "booking", "reserve", "reservation", "i want to book", "how do i book", "book now"]
+        booking_keywords = ["yes please", "yes", "book", "booking", "reserve", "reservation", "i want to book", "how do i book", "book now",
+                            "hifadhi", "weka", "ninataka kuhifadhi", "réserver", "reservar", "buchen", "prenotare"]
         if any(keyword in question.lower() for keyword in booking_keywords):
             return jsonify({
-                "answer": "Great! To book your Uganda experience, please visit our booking page at https://everything-ug.netlify.app/holiday-booking or contact us directly. Our team will help you plan the perfect trip tailored to your interests and budget.",
-                "suggested_questions": [
-                    "What destinations can I visit?",
-                    "Tell me about accommodation options",
-                    "What activities are available?"
-                ],
+                "answer": get_lang_response(_booking_answers, user_language),
+                "suggested_questions": get_lang_response(_booking_questions, user_language),
                 "action_buttons": [],
                 "booking_buttons": [],
                 "show_booking_prompt": True,
@@ -179,22 +214,40 @@ def chat():
                 }), 503
 
         # System prompt - more natural and conversational
-        system_prompt = f"""You are Nambi, Virtual Consultant for Everything Uganda.
+        system_prompt = f"""You are Nambi, Virtual Travel Assistant for Everything Uganda. You are warm, charming, and knowledgeable.
 
-CRITICAL RULES:
-- Answer ONLY using the company content below
-- The company content contains information from multiple pages including accommodation, destinations, culture, activities, etc.
-- Search thoroughly through ALL the content before saying you don't have information
-- Be conversational, friendly, and natural
+LANGUAGE RULE — THIS IS THE MOST IMPORTANT RULE:
+The user is communicating in: {user_language}
+You MUST respond in that exact language. If the user writes in Swahili, respond fully in Swahili.
+If they switch to French, respond in French. Never refuse to use the user's language.
+Never say "I don't speak [language]" — you always respond in whatever language the user uses.
+
+CONVERSATION STRUCTURE RULES:
+- Always open your reply by directly acknowledging what the user asked — never start with a generic filler phrase
+- Structure longer answers with clear short paragraphs, each covering one point
+- Use natural transitions between paragraphs ("Beyond that...", "What makes this special is...", "On top of that...")
+- End every response with one engaging follow-up question or a gentle nudge toward the next step
+- Never use bullet point lists — write in flowing, conversational prose
+- Keep responses to 2-3 focused paragraphs maximum
 - Use "in summary" instead of "in short"
 - Refer to business collaborations as "partnerships"
-- After answering informational questions, subtly encourage booking with phrases like "Would you like to explore this further?" or "Interested in experiencing this?"
-- Keep responses concise (2-3 paragraphs max)
 
-IMPORTANT: The content below includes sections marked with "--- CONTENT FROM [URL] ---". Look through ALL sections to find relevant information.
+CONTENT RULES:
+- Answer ONLY using the company content below
+- Search thoroughly through ALL the content before saying you don't have information
+- After answering, subtly encourage the next step with phrases like "Would you like to explore this further?" or "Shall I help you plan a visit?"
 
-If after searching ALL the content you truly cannot find the answer, respond:
-"I don't have specific details on that right now, but I'd be happy to help you with other information about Uganda. You can also visit https://everything-ug.netlify.app/where-to-stay for accommodation details or contact us directly."
+ACTIVITIES YOU KNOW ABOUT:
+Wildlife & Nature, Gorilla Trekking, Chimpanzee Tracking, Game Drives, Bird Watching,
+White Water Rafting, Hiking, Mountain Climbing, Cultural Village Visits, Craft Markets,
+Agrofarming Tours, Coffee Plantation Visits, Vanilla Farm Tours, Tea Estate Walks,
+Fishing on Lake Victoria, Lake Albert Fishing, Nile Perch Angling, Boat Cruises,
+Sunset Cruises, Spa Retreats
+
+IMPORTANT: The content below includes sections marked with "--- CONTENT FROM [URL] ---". Look through ALL sections.
+
+If after searching ALL the content you truly cannot find the answer, respond in {user_language}:
+"I don't have specific details on that right now, but I'd be happy to help you with other aspects of your Uganda journey. You can also visit https://www.everythinguganda.com/where-to-stay or contact us directly."
 
 COMPANY CONTENT:
 {site_content}
@@ -273,7 +326,6 @@ def debug_content():
         "has_accommodation": "accommodation" in site_content.lower() if site_content else False,
         "has_where_to_stay": "where to stay" in site_content.lower() if site_content else False,
         "content_preview": site_content[:500] if site_content else "No content",
-        "urls_count": len(SITE_URLS)
     })
 
 

@@ -74,4 +74,8 @@ with app.app_context():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug_mode = os.environ.get("FLASK_ENV") != "production"
+    print(f"\n{'='*50}")
+    print(f"  Nambi API running at: http://localhost:{port}")
+    print(f"  Swagger UI:           http://localhost:{port}/apidocs")
+    print(f"{'='*50}\n")
     app.run(host="0.0.0.0", port=port, debug=debug_mode)

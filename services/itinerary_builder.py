@@ -17,8 +17,8 @@ class ItineraryBuilder:
     # Required information to build an itinerary
     REQUIRED_INFO = {
         'duration': 'How many days will you be traveling?',
-        'budget': 'What is your approximate budget per person (in USD)?',
-        'interests': 'What are you most interested in? (e.g., wildlife, culture, adventure, relaxation)',
+        'budget': 'What is your approximate budget per person in British Pounds (£)?',
+        'interests': 'What are you most interested in? (e.g., wildlife, culture, adventure, agrofarming, fishing, relaxation)',
         'pace': 'Do you prefer a relaxed or packed schedule?',
         'accommodation': 'What type of accommodation do you prefer? (budget, mid-range, luxury)',
     }
@@ -75,7 +75,9 @@ class ItineraryBuilder:
             'culture': ['culture', 'cultural', 'traditional', 'history', 'heritage', 'local'],
             'adventure': ['adventure', 'hiking', 'rafting', 'climbing', 'trekking'],
             'relaxation': ['relax', 'relaxation', 'peaceful', 'calm', 'leisure'],
-            'nature': ['nature', 'scenery', 'landscape', 'mountains', 'lakes']
+            'nature': ['nature', 'scenery', 'landscape', 'mountains', 'lakes'],
+            'agrofarming': ['agro', 'agrofarming', 'farming', 'agriculture', 'farm', 'plantation', 'crops', 'rural'],
+            'fishing': ['fishing', 'fish', 'lake fishing', 'nile perch', 'angling', 'boat fishing']
         }
         
         detected_interests = []
@@ -141,20 +143,29 @@ class ItineraryBuilder:
 
 TRAVELER REQUIREMENTS:
 - Duration: {info['duration']} days
-- Budget: ${info['budget']} per person
+- Budget: £{info['budget']} per person (British Pounds)
 - Interests: {info['interests']}
 - Pace: {info.get('pace', 'moderate')}
 - Accommodation: {info['accommodation']}
 - Group size: {info.get('group_size', 1)} person(s)
 
+AVAILABLE ACTIVITIES (include relevant ones based on interests):
+Wildlife & Nature: gorilla trekking, chimpanzee tracking, game drives, bird watching, nature walks
+Adventure: white water rafting, hiking, mountain climbing, zip-lining, quad biking
+Culture & Heritage: village visits, cultural performances, craft markets, historical sites
+Water Activities: fishing on Lake Victoria or Lake Albert, Nile perch angling, boat cruises, lake fishing
+Agro-experiences: agrofarming tours, coffee plantation visits, vanilla farm tours, tea estate walks, rural farm stays
+Relaxation: sunset cruises, spa retreats, lodge relaxation, scenic drives
+
 INSTRUCTIONS:
 1. Create a realistic day-by-day itinerary
 2. Include specific destinations from Uganda
 3. Suggest appropriate accommodations for each location
-4. Include estimated costs
+4. ALL costs must be quoted in British Pounds (£), not USD
 5. Consider travel time between destinations
 6. Match the pace preference (relaxed = fewer activities, packed = more activities)
 7. Focus on the traveler's interests
+8. If interests include agrofarming or fishing, dedicate at least one full day to that activity
 
 UGANDA CONTEXT (use this information):
 {site_content[:3000]}
@@ -163,11 +174,11 @@ OUTPUT FORMAT (JSON):
 {{
   "title": "Descriptive title",
   "days": {info['duration']},
-  "budget": "{info['budget']}",
+  "budget": "£{info['budget']}",
   "places": "Comma-separated list of destinations",
   "accommodation": "Accommodation recommendations",
   "transport": "Transportation details",
-  "details": "Day-by-day breakdown with activities",
+  "details": "Day-by-day breakdown with activities and costs in £",
   "package_name": "Budget/Silver/Gold/Platinum based on budget level"
 }}
 
@@ -205,7 +216,7 @@ Generate the itinerary now:"""
         return {
             'title': f"{info['duration']} Days Uganda Adventure",
             'days': info['duration'],
-            'budget': str(info['budget']),
+            'budget': f"£{info['budget']}",
             'places': ', '.join(places[:5]) if places else 'Kampala, Entebbe',
             'accommodation': f"{info['accommodation']} accommodations",
             'transport': 'Private vehicle with driver-guide',

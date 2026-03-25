@@ -20,126 +20,121 @@ class VoiceService:
     # small = better accuracy for non-English languages (~6x realtime on CPU)
     # large = most accurate, slowest (~1x realtime on CPU)
     DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "base")
-    DEFAULT_TIMEOUT = int(os.getenv("WHISPER_TIMEOUT", "120"))
-    
+    DEFAULT_TIMEOUT = int(os.getenv("WHISPER_TIMEOUT", "30"))
+
+    # Pre-load model at import time so first request isn't slow
     _model = None
+    _model_lock = threading.Lock()
     
     @classmethod
     def load_model(cls, model_size=None):
-        """Load Whisper model (lazy loading)"""
-        if cls._model is None:
-            model_size = model_size or cls.DEFAULT_MODEL
-            print(f"Loading Whisper model: {model_size}...")
-            cls._model = whisper.load_model(model_size)
-            print(f"✓ Whisper model loaded: {model_size}")
+        """Load Whisper model (lazy loading, thread-safe)"""
+        with cls._model_lock:
+            if cls._model is None:
+                model_size = model_size or cls.DEFAULT_MODEL
+                print(f"Loading Whisper model: {model_size}...")
+                cls._model = whisper.load_model(model_size)
+                print(f"✓ Whisper model loaded: {model_size}")
         return cls._model
-    
+
     @staticmethod
     def transcribe_audio(audio_file_path, language=None, timeout=None):
-        """
-        Transcribe audio file to text with timeout protection
-        
-        Args:
-            audio_file_path: Path to audio file (mp3, wav, m4a, etc.)
-            language: Optional language code (e.g., 'en', 'sw' for Swahili)
-            timeout: Maximum seconds to wait (default from env or 120s)
-        
-        Returns:
-            dict with 'text', 'language', 'confidence'
-        """
         if timeout is None:
             timeout = VoiceService.DEFAULT_TIMEOUT
         try:
-            # Verify file exists
             if not os.path.exists(audio_file_path):
-                return {
-                    'success': False,
-                    'text': None,
-                    'language': None,
-                    'segments': [],
-                    'error': f'Audio file not found: {audio_file_path}'
-                }
-            
+                return {'success': False, 'text': None, 'language': None,
+                        'segments': [], 'error': f'File not found: {audio_file_path}'}
+
             file_size = os.path.getsize(audio_file_path)
-            print(f"Transcribing file: {audio_file_path} (size: {file_size} bytes)")
-            
+            print(f"Transcribing: {audio_file_path} ({file_size} bytes)")
+
+            # Convert webm/ogg to wav for faster Whisper processing
+            wav_path = audio_file_path
+            converted = False
+            if audio_file_path.endswith(('.webm', '.ogg', '.m4a')):
+                try:
+                    import subprocess
+                    wav_path = audio_file_path.replace(
+                        Path(audio_file_path).suffix, '.wav'
+                    )
+                    subprocess.run(
+                        ['ffmpeg', '-y', '-i', audio_file_path,
+                         '-ar', '16000', '-ac', '1', '-f', 'wav', wav_path],
+                        capture_output=True, timeout=15
+                    )
+                    if os.path.exists(wav_path):
+                        converted = True
+                        print(f"Converted to WAV: {wav_path}")
+                except Exception as e:
+                    print(f"FFmpeg conversion skipped: {e}")
+                    wav_path = audio_file_path
+
             model = VoiceService.load_model()
-            
-            # Transcribe with optimized settings for CPU
+
+            # Speed-optimised options — fastest possible on CPU
             options = {
-                'fp16': False,  # Explicitly disable FP16 on CPU
-                'verbose': False  # Reduce console output
+                'fp16': False,
+                'verbose': False,
+                'beam_size': 1,           # greedy decode — fastest
+                'best_of': 1,             # no sampling candidates
+                'temperature': 0,         # deterministic, no retries
+                'condition_on_previous_text': False,  # no context window overhead
+                'compression_ratio_threshold': 2.4,
+                'no_speech_threshold': 0.6,
             }
             if language:
                 options['language'] = language
-            
-            # Use threading with timeout to prevent hanging
+
             result_queue = queue.Queue()
             error_queue = queue.Queue()
-            
+
             def transcribe_worker():
                 try:
-                    print("Starting Whisper transcription (this may take 10-60 seconds on CPU)...")
-                    result = model.transcribe(audio_file_path, **options)
+                    result = model.transcribe(wav_path, **options)
                     result_queue.put(result)
                 except Exception as e:
                     error_queue.put(e)
-            
-            # Start transcription in separate thread
+
             worker_thread = threading.Thread(target=transcribe_worker, daemon=True)
             worker_thread.start()
-            
-            # Wait for result with timeout
             worker_thread.join(timeout=timeout)
-            
+
+            # Cleanup converted wav
+            if converted and os.path.exists(wav_path):
+                try:
+                    os.unlink(wav_path)
+                except Exception:
+                    pass
+
             if worker_thread.is_alive():
-                # Timeout occurred
-                print(f"ERROR: Transcription timed out after {timeout} seconds")
-                return {
-                    'success': False,
-                    'text': None,
-                    'language': None,
-                    'segments': [],
-                    'error': f'Transcription timed out after {timeout} seconds. Try using a shorter audio clip or switch to "tiny" or "base" model.'
-                }
-            
-            # Check for errors
+                return {'success': False, 'text': None, 'language': None,
+                        'segments': [], 'error': f'Timed out after {timeout}s'}
+
             if not error_queue.empty():
-                error = error_queue.get()
-                raise error
-            
-            # Get result
+                raise error_queue.get()
+
             if result_queue.empty():
-                return {
-                    'success': False,
-                    'text': None,
-                    'language': None,
-                    'segments': [],
-                    'error': 'Transcription completed but no result was returned'
-                }
-            
+                return {'success': False, 'text': None, 'language': None,
+                        'segments': [], 'error': 'No result returned'}
+
             result = result_queue.get()
-            print(f"Transcription successful: '{result['text'][:100]}...'")
-            
+            text = result['text'].strip()
+            print(f"Transcription done: '{text[:80]}'")
+
             return {
                 'success': True,
-                'text': result['text'].strip(),
+                'text': text,
                 'language': result.get('language', 'unknown'),
                 'segments': result.get('segments', []),
                 'error': None
             }
-            
+
         except Exception as e:
             import traceback
-            print("Transcription error:")
             traceback.print_exc()
-            return {
-                'success': False,
-                'text': None,
-                'language': None,
-                'segments': [],
-                'error': str(e)
-            }
+            return {'success': False, 'text': None, 'language': None,
+                    'segments': [], 'error': str(e)}
     
     @staticmethod
     def transcribe_audio_bytes(audio_bytes, filename="audio.wav", language=None):

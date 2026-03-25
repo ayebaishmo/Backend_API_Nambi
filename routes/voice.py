@@ -15,6 +15,99 @@ voice_bp = Blueprint("voice", __name__)
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'm4a', 'ogg', 'flac', 'webm'}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 
+# Language to neural voice map
+# Note: sw-KE-ZuriNeural exists in edge-tts; fallback to en-GB-SoniaNeural if it fails
+VOICE_MAP = {
+    'en': 'en-GB-SoniaNeural',
+    'sw': 'sw-KE-ZuriNeural',
+    'fr': 'fr-FR-DeniseNeural',
+    'de': 'de-DE-KatjaNeural',
+    'es': 'es-ES-ElviraNeural',
+    'pt': 'pt-BR-FranciscaNeural',
+    'it': 'it-IT-ElsaNeural',
+    'ar': 'ar-EG-SalmaNeural',
+    'zh': 'zh-CN-XiaoxiaoNeural',
+    'zh-cn': 'zh-CN-XiaoxiaoNeural',
+    'ru': 'ru-RU-SvetlanaNeural',
+    'ko': 'ko-KR-SunHiNeural',
+    'ja': 'ja-JP-NanamiNeural',
+    'hi': 'hi-IN-SwaraNeural',
+}
+
+
+def _strip_markdown(text):
+    """Remove markdown formatting so TTS reads clean text."""
+    import re
+    text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)   # bold/italic
+    text = re.sub(r'#{1,6}\s*', '', text)                  # headers
+    text = re.sub(r'`{1,3}.*?`{1,3}', '', text, flags=re.DOTALL)  # code
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # links
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)   # bullets
+    text = re.sub(r'\n{2,}', '. ', text)                   # double newlines → pause
+    text = re.sub(r'\n', ' ', text)                        # single newlines
+    return text.strip()
+
+
+def _run_async(coro):
+    """Run an async coroutine safely on Windows — always uses a fresh thread with its own event loop."""
+    import asyncio
+    import concurrent.futures
+
+    def run_in_thread(c):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(c)
+        finally:
+            loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_in_thread, coro)
+        return future.result(timeout=30)  # 30s max for TTS
+
+
+def _generate_audio_b64(text, language='en'):
+    """Generate audio from text and return as base64 string"""
+    try:
+        import edge_tts
+        import base64
+
+        clean_text = _strip_markdown(text)
+        if not clean_text:
+            print("Audio generation skipped: empty text after stripping")
+            return None
+
+        voice = VOICE_MAP.get(language, 'en-GB-SoniaNeural')
+        print(f"Generating audio: voice={voice}, lang={language}, chars={len(clean_text)}")
+
+        async def generate(v):
+            communicate = edge_tts.Communicate(clean_text, v)
+            audio_data = b""
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_data += chunk["data"]
+            return audio_data
+
+        # Try the mapped voice; fall back to Sonia if it fails (e.g. sw-KE-ZuriNeural unavailable)
+        try:
+            audio_bytes = _run_async(generate(voice))
+        except Exception as voice_err:
+            print(f"Voice {voice} failed ({voice_err}), falling back to en-GB-SoniaNeural")
+            audio_bytes = _run_async(generate('en-GB-SoniaNeural'))
+
+        if not audio_bytes:
+            print("Audio generation returned empty bytes")
+            return None
+
+        print(f"Audio generated: {len(audio_bytes)} bytes")
+        return base64.b64encode(audio_bytes).decode('utf-8')
+
+    except Exception as e:
+        import traceback
+        print(f"Audio generation failed: {e}")
+        traceback.print_exc()
+        return None
+
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -239,7 +332,7 @@ def get_models():
 @voice_bp.route("/voice/speak", methods=["POST"])
 def text_to_speech():
     """
-    Convert text to speech (for welcome message narration)
+    Convert text to speech using Microsoft Edge Neural TTS
     ---
     tags:
       - Voice
@@ -256,6 +349,9 @@ def text_to_speech():
             language:
               type: string
               example: "en"
+            voice:
+              type: string
+              example: "en-US-JennyNeural"
     responses:
       200:
         description: Audio file (mp3)
@@ -269,26 +365,55 @@ def text_to_speech():
 
         text = data.get('text')
         language = data.get('language', 'en')
+        requested_voice = data.get('voice')
 
-        # Use gTTS (Google Text-to-Speech) - free
-        from gtts import gTTS
-        import io
+        # Strip markdown so TTS reads clean text
+        text = _strip_markdown(text)
+        if not text:
+            return jsonify({'error': 'text is empty after processing'}), 400
 
-        tts = gTTS(text=text, lang=language, slow=False)
+        # Map language codes to best neural voices
+        language_voice_map = {
+            'en': 'en-GB-SoniaNeural',      # warm, elegant British female - Nambi's voice
+            'sw': 'sw-KE-ZuriNeural',
+            'fr': 'fr-FR-DeniseNeural',
+            'de': 'de-DE-KatjaNeural',
+            'es': 'es-ES-ElviraNeural',
+            'pt': 'pt-BR-FranciscaNeural',
+            'it': 'it-IT-ElsaNeural',
+            'ar': 'ar-EG-SalmaNeural',
+            'zh': 'zh-CN-XiaoxiaoNeural',
+            'zh-cn': 'zh-CN-XiaoxiaoNeural',
+            'ru': 'ru-RU-SvetlanaNeural',
+            'ko': 'ko-KR-SunHiNeural',
+            'ja': 'ja-JP-NanamiNeural',
+            'hi': 'hi-IN-SwaraNeural',
+        }
 
-        # Save to bytes buffer
-        audio_buffer = io.BytesIO()
-        tts.write_to_fp(audio_buffer)
-        audio_buffer.seek(0)
+        # Use requested voice, or pick best for language, or default to Sonia
+        voice = requested_voice or language_voice_map.get(language, 'en-GB-SoniaNeural')
 
-        from flask import send_file
-        return send_file(
-            audio_buffer,
-            mimetype='audio/mpeg',
-            as_attachment=False,
-            download_name='speech.mp3'
+        import edge_tts
+        from flask import Response
+
+        async def generate(v):
+            communicate = edge_tts.Communicate(text, v)
+            audio_data = b""
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_data += chunk["data"]
+            return audio_data
+
+        try:
+            audio_bytes = _run_async(generate(voice))
+        except Exception:
+            audio_bytes = _run_async(generate('en-GB-SoniaNeural'))
+
+        return Response(
+            audio_bytes,
+            mimetype="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=speech.mp3"}
         )
-
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -361,13 +486,14 @@ def voice_chat():
         audio_bytes = file.read()
         print(f"Audio size: {len(audio_bytes)} bytes")
         
-        # Use language hint only if it's a valid 2-letter code (not 'en' default)
+        # Use language hint if explicitly provided by frontend (not the default 'en')
+        # If no hint or default 'en', let Whisper auto-detect
         whisper_language = None
-        if language_hint and language_hint != 'en' and len(language_hint) == 2:
+        if language_hint and language_hint not in ('en', 'auto') and len(language_hint) <= 5:
             whisper_language = language_hint
             print(f"Using language hint for Whisper: {whisper_language}")
         else:
-            print("Auto-detecting language...")
+            print("Auto-detecting language (no explicit hint)...")
         
         print("Starting transcription...")
         transcription = VoiceService.transcribe_audio_bytes(
@@ -394,6 +520,16 @@ def voice_chat():
         
         question = transcription['text']
         detected_language = transcription.get('language', 'en')
+        
+        # Fix: if Whisper had low confidence (high no_speech_prob) and detected
+        # an unlikely language, fall back to Swahili (primary user base)
+        segments = transcription.get('segments', [])
+        if segments:
+            avg_no_speech = sum(s.get('no_speech_prob', 0) for s in segments) / len(segments)
+            unlikely_langs = {'ko', 'ja', 'zh', 'ru', 'ar', 'hi', 'th', 'vi', 'tr', 'pl', 'nl'}
+            if avg_no_speech > 0.4 and detected_language in unlikely_langs:
+                print(f"Low confidence ({avg_no_speech:.2f}) for {detected_language}, falling back to Swahili")
+                detected_language = 'sw'
         
         print(f"=" * 80)
         print(f"TRANSCRIPTION RESULT:")
@@ -444,12 +580,17 @@ def voice_chat():
         if is_greeting and is_first_message:
             from services.multilingual_chat_service import MultilingualChatService
             welcome_message = MultilingualChatService.get_welcome_message(user_lang)
+            
+            # Generate audio for welcome message
+            audio_b64 = _generate_audio_b64(welcome_message, user_lang)
+            
             return jsonify({
                 "transcription": {
                     "text": transcription['text'],
                     "language": detected_language
                 },
                 "answer": welcome_message,
+                "audio_base64": audio_b64,
                 "suggested_questions": [
                     "What are the top tourist destinations in Uganda?",
                     "Tell me about accommodation options",
@@ -467,12 +608,32 @@ def voice_chat():
         site_content = get_site_content()
         
         # System prompt
-        system_prompt = f"""You are Nambi, Virtual Consultant for Everything Uganda.
+        system_prompt = f"""You are Nambi, Virtual Travel Assistant for Everything Uganda. You are warm, charming, and knowledgeable.
 
-CRITICAL RULES:
+LANGUAGE RULE — THIS IS THE MOST IMPORTANT RULE:
+The user is communicating in: {user_lang}
+You MUST respond in that exact language. If the user speaks Swahili, respond fully in Swahili.
+If they switch to French, respond in French. Never refuse to use the user's language.
+Never say "I don't speak [language]" — always respond in whatever language the user uses.
+
+CONVERSATION STRUCTURE RULES:
+- Always open your reply by directly acknowledging what the user asked
+- Structure answers in clear short paragraphs, each covering one point
+- Use natural transitions ("Beyond that...", "What makes this special is...", "On top of that...")
+- End every response with one engaging follow-up question or gentle nudge
+- Never use bullet point lists — write in flowing conversational prose
+- Keep responses to 2-3 focused paragraphs maximum
+
+ACTIVITIES YOU KNOW ABOUT:
+Wildlife, Gorilla Trekking, Chimpanzee Tracking, Game Drives, Bird Watching,
+White Water Rafting, Hiking, Mountain Climbing, Cultural Village Visits,
+Agrofarming Tours, Coffee Plantation Visits, Vanilla Farm Tours, Tea Estate Walks,
+Fishing on Lake Victoria, Lake Albert Fishing, Nile Perch Angling, Boat Cruises
+
+CONTENT RULES:
 - Answer ONLY using the company content below
 - Be conversational, friendly, and natural
-- Keep responses concise (2-3 paragraphs max)
+- If you cannot find the answer, say so in {user_lang} and suggest visiting https://www.everythinguganda.com
 
 COMPANY CONTENT:
 {site_content}
@@ -521,6 +682,7 @@ COMPANY CONTENT:
                 'language': detected_language
             },
             'answer': translated_response,
+            'audio_base64': _generate_audio_b64(translated_response, user_lang),
             'suggested_questions': [],
             'action_buttons': [],
             'booking_buttons': [],

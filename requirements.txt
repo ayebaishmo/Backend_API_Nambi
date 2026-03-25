@@ -60,6 +60,8 @@ uritemplate==4.2.0
 urllib3==2.6.3
 Werkzeug==3.1.5
 PyJWT==2.10.1
-googletrans==4.0.0rc1
 openai-whisper==20231117
-gTTS==2.5.1
+edge-tts==6.1.9
+scrapy==2.14.2
+google-genai
+deep-translator
