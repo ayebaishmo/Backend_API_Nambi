@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from gemini import get_gemini_model
 from services.content_fetcher import fetch_full_site
 from services.session_manager import SessionManager
@@ -47,8 +47,67 @@ def get_site_content():
         return load_site_content()
     return _site_content if _site_content else ""
 
+
+# In-memory language cache — avoids DB hit on every message
+_session_lang_cache = {}
+
+
+def _fast_detect_language(text, session_id=None):
+    """
+    Pure in-memory language detection — zero DB calls, zero network calls.
+    """
+    if not text or not text.strip():
+        return _session_lang_cache.get(session_id, 'en')
+
+    t = text.lower().strip()
+
+    # Greeting keyword map
+    greeting_map = {
+        'habari': 'sw', 'jambo': 'sw', 'mambo': 'sw', 'karibu': 'sw',
+        'bonjour': 'fr', 'salut': 'fr', 'bonsoir': 'fr',
+        'hola': 'es', 'buenos': 'es', 'gracias': 'es',
+        'hallo': 'de', 'guten': 'de', 'danke': 'de',
+        'ciao': 'it', 'buongiorno': 'it', 'grazie': 'it',
+        'olá': 'pt', 'obrigado': 'pt',
+        'привет': 'ru', 'здравствуйте': 'ru', 'спасибо': 'ru',
+        'مرحبا': 'ar', 'شكرا': 'ar', 'السلام': 'ar',
+        'नमस्ते': 'hi', 'धन्यवाद': 'hi',
+        '안녕': 'ko', '감사': 'ko',
+        'こんにちは': 'ja', 'ありがとう': 'ja',
+        '你好': 'zh-cn', '谢谢': 'zh-cn',
+    }
+    for word, lang in greeting_map.items():
+        if word in t:
+            if session_id:
+                _session_lang_cache[session_id] = lang
+            return lang
+
+    # Unicode script detection — instant
+    for char in text:
+        cp = ord(char)
+        if 0x0600 <= cp <= 0x06FF:
+            lang = 'ar'
+        elif 0x0900 <= cp <= 0x097F:
+            lang = 'hi'
+        elif 0xAC00 <= cp <= 0xD7AF:
+            lang = 'ko'
+        elif 0x3040 <= cp <= 0x30FF:
+            lang = 'ja'
+        elif 0x4E00 <= cp <= 0x9FFF:
+            lang = 'zh-cn'
+        elif 0x0400 <= cp <= 0x04FF:
+            lang = 'ru'
+        else:
+            continue
+        if session_id:
+            _session_lang_cache[session_id] = lang
+        return lang
+
+    # Fall back to cached session language (user was speaking non-English before)
+    cached = _session_lang_cache.get(session_id, 'en')
+    return cached
+
 @chat_bp.route("/chat", methods=["POST", "OPTIONS"])
-@rate_limit
 def chat():
     """
     Chat with Nambi (Everything Uganda Virtual Consultant)
@@ -87,14 +146,10 @@ def chat():
         
         question = data.get("question", "").strip()
         session_id = data.get("session_id")
-        is_first_message = data.get("is_first_message", False)
-        
-        # Process message with translation support
-        translation_result = MultilingualChatService.process_user_message(session_id, question)
-        user_language = translation_result['user_language']
-        english_question = translation_result['english_message']
-        
-        print(f"User language: {user_language}, Original: '{question}', English: '{english_question}'")
+
+        # Fast in-memory language detection — zero DB, zero network
+        user_language = _fast_detect_language(question, session_id)
+        english_question = question  # Gemini handles all languages natively
 
         # Multilingual static responses
         _suggested_questions = {
@@ -193,105 +248,76 @@ def chat():
         
         # Debug: Check if content is loaded
         if not site_content or len(site_content) < 100:
-            print(f"WARNING: Site content is empty or too short. Length: {len(site_content) if site_content else 0}")
-        else:
-            print(f"Site content loaded successfully. Length: {len(site_content)} characters")
-            # Check if accommodation info is in content
-            if "accommodation" in site_content.lower() or "where to stay" in site_content.lower():
-                print("✓ Accommodation content found in site_content")
-            else:
-                print("✗ Accommodation content NOT found in site_content")
-        
+            print(f"WARNING: Site content is empty or too short.")
+
         # If site content is empty, try loading from file
         if not site_content:
             try:
                 with open("company_content.txt", "r", encoding="utf-8") as f:
                     site_content = f.read()
-                    print(f"Loaded content from file. Length: {len(site_content)}")
             except FileNotFoundError:
-                return jsonify({
-                    "error": "Content not available. Please try again later."
-                }), 503
+                return jsonify({"error": "Content not available. Please try again later."}), 503
 
-        # System prompt - more natural and conversational
-        system_prompt = f"""You are Nambi, Virtual Travel Assistant for Everything Uganda. You are warm, charming, and knowledgeable.
+        # Trim to 4000 chars — pre-sliced at module level would be faster
+        # but content loads async so we slice here
+        site_content_trimmed = site_content[:4000] if site_content else ""
 
-LANGUAGE RULE — THIS IS THE MOST IMPORTANT RULE:
-The user is communicating in: {user_language}
-You MUST respond in that exact language. If the user writes in Swahili, respond fully in Swahili.
-If they switch to French, respond in French. Never refuse to use the user's language.
-Never say "I don't speak [language]" — you always respond in whatever language the user uses.
+        # System prompt
+        system_prompt = f"""You are Nambi, Virtual Travel Assistant for Everything Uganda. You are warm, fun and quick.
 
-CONVERSATION STRUCTURE RULES:
-- Always open your reply by directly acknowledging what the user asked — never start with a generic filler phrase
-- Structure longer answers with clear short paragraphs, each covering one point
-- Use natural transitions between paragraphs ("Beyond that...", "What makes this special is...", "On top of that...")
-- End every response with one engaging follow-up question or a gentle nudge toward the next step
-- Never use bullet point lists — write in flowing, conversational prose
-- Keep responses to 2-3 focused paragraphs maximum
-- Use "in summary" instead of "in short"
-- Refer to business collaborations as "partnerships"
+LANGUAGE: Respond in {user_language} only.
 
-CONTENT RULES:
-- Answer ONLY using the company content below
-- Search thoroughly through ALL the content before saying you don't have information
-- After answering, subtly encourage the next step with phrases like "Would you like to explore this further?" or "Shall I help you plan a visit?"
+RESPONSE RULES:
+- ONE short paragraph only — 2-3 sentences max
+- Be direct, warm and conversational — like texting a friend
+- End with a quick follow-up question to keep the chat going
+- No bullet points, no headers, no long explanations
+- Use the company content below to answer accurately
 
-ACTIVITIES YOU KNOW ABOUT:
-Wildlife & Nature, Gorilla Trekking, Chimpanzee Tracking, Game Drives, Bird Watching,
-White Water Rafting, Hiking, Mountain Climbing, Cultural Village Visits, Craft Markets,
-Agrofarming Tours, Coffee Plantation Visits, Vanilla Farm Tours, Tea Estate Walks,
-Fishing on Lake Victoria, Lake Albert Fishing, Nile Perch Angling, Boat Cruises,
-Sunset Cruises, Spa Retreats
-
-IMPORTANT: The content below includes sections marked with "--- CONTENT FROM [URL] ---". Look through ALL sections.
-
-If after searching ALL the content you truly cannot find the answer, respond in {user_language}:
-"I don't have specific details on that right now, but I'd be happy to help you with other aspects of your Uganda journey. You can also visit https://www.everythinguganda.com/where-to-stay or contact us directly."
+If you can't find the answer: "I don't have that detail right now, but visit https://www.everythinguganda.com or ask me something else about Uganda!"
 
 COMPANY CONTENT:
-{site_content}
+{site_content_trimmed}
 """
 
-        # Build full prompt
-        full_prompt = system_prompt + f"\n\nUser Question:\n{english_question}"
+        full_prompt = system_prompt + f"\n\nUser: {english_question}"
 
         # Call Gemini
         response = model.generate_content(full_prompt)
-        
-        # Translate response to user's language
-        response_result = MultilingualChatService.process_ai_response(session_id, response.text)
-        translated_response = response_result['translated_response']
-        
-        print(f"AI response (English): '{response.text[:100]}...'")
-        print(f"Translated to {user_language}: '{translated_response[:100]}...'")
+        translated_response = response.text
 
-        # Store conversation in database with session management
+        # Store conversation in background — never block the response
         if session_id:
-            try:
-                # Use session manager to handle session lifecycle
-                conversation = SessionManager.get_or_create_session(session_id)
-                
-                # Store user message (original language)
-                user_message = Message(
-                    conversation_id=conversation.id,
-                    role='user',
-                    content=question
-                )
-                db.session.add(user_message)
-                
-                # Store bot response (translated)
-                bot_message = Message(
-                    conversation_id=conversation.id,
-                    role='bot',
-                    content=translated_response
-                )
-                db.session.add(bot_message)
-                
-                db.session.commit()
-            except Exception as e:
-                print(f"Failed to store conversation: {str(e)}")
-                db.session.rollback()
+            _app = current_app._get_current_object()
+            _q = question
+            _r = translated_response
+            def _store():
+                try:
+                    with _app.app_context():
+                        # Use merge/upsert pattern to avoid UniqueViolation
+                        conv = Conversation.query.filter_by(session_id=session_id).first()
+                        if not conv:
+                            conv = Conversation(
+                                session_id=session_id,
+                                language=user_language,
+                                is_active=True
+                            )
+                            db.session.add(conv)
+                            try:
+                                db.session.flush()
+                            except Exception:
+                                db.session.rollback()
+                                conv = Conversation.query.filter_by(session_id=session_id).first()
+                        db.session.add(Message(conversation_id=conv.id, role='user', content=_q))
+                        db.session.add(Message(conversation_id=conv.id, role='bot', content=_r))
+                        db.session.commit()
+                except Exception as e:
+                    print(f"Background store failed: {e}")
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+            threading.Thread(target=_store, daemon=True).start()
 
         # Return response with all required fields
         return jsonify({

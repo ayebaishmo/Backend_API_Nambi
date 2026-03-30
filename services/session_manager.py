@@ -10,24 +10,34 @@ class SessionManager:
     
     @staticmethod
     def get_or_create_session(session_id):
-        """Get existing session or create new one"""
+        """Get existing session or create new one — safe against race conditions."""
         conversation = Conversation.query.filter_by(session_id=session_id).first()
-        
+
         if conversation:
-            # Check if expired
             if conversation.is_expired():
                 conversation.is_active = False
-                db.session.commit()
-                # Create new session
-                conversation = SessionManager._create_new_session(session_id)
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
             else:
-                # Extend existing session
-                conversation.extend_session(SessionManager.SESSION_TIMEOUT_MINUTES)
-                db.session.commit()
-        else:
-            conversation = SessionManager._create_new_session(session_id)
-        
-        return conversation
+                try:
+                    conversation.extend_session(SessionManager.SESSION_TIMEOUT_MINUTES)
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+            return conversation
+
+        # Try to create — handle race condition gracefully
+        try:
+            return SessionManager._create_new_session(session_id)
+        except Exception:
+            db.session.rollback()
+            # Another thread already created it — just fetch it
+            conv = Conversation.query.filter_by(session_id=session_id).first()
+            if conv:
+                return conv
+            raise
     
     @staticmethod
     def _create_new_session(session_id):

@@ -520,85 +520,34 @@ def voice_chat():
         
         question = transcription['text']
         detected_language = transcription.get('language', 'en')
-        
-        # Fix: if Whisper had low confidence (high no_speech_prob) and detected
-        # an unlikely language, fall back to Swahili (primary user base)
+
+        # Fix: low confidence on unlikely language → fall back to Swahili
         segments = transcription.get('segments', [])
         if segments:
             avg_no_speech = sum(s.get('no_speech_prob', 0) for s in segments) / len(segments)
             unlikely_langs = {'ko', 'ja', 'zh', 'ru', 'ar', 'hi', 'th', 'vi', 'tr', 'pl', 'nl'}
             if avg_no_speech > 0.4 and detected_language in unlikely_langs:
-                print(f"Low confidence ({avg_no_speech:.2f}) for {detected_language}, falling back to Swahili")
+                print(f"Low confidence ({avg_no_speech:.2f}) for {detected_language}, falling back to sw")
                 detected_language = 'sw'
-        
-        print(f"=" * 80)
-        print(f"TRANSCRIPTION RESULT:")
-        print(f"Text: '{question}'")
-        print(f"Detected Language: {detected_language}")
-        print(f"Language Name: {VoiceService.get_supported_languages().get(detected_language, 'Unknown')}")
-        print(f"=" * 80)
-        
-        # Use Whisper's detected language for voice (more reliable than googletrans)
-        # Accept any language Whisper detects
+
         user_lang = detected_language
-        
-        print(f"Using Whisper detected language: {user_lang}")
-        print(f"Language name: {VoiceService.get_supported_languages().get(user_lang, 'Unknown')}")
-        
-        # Translate to English if needed
-        if user_lang != 'en':
-            from services.translation_service import get_translation_service
-            translation_service = get_translation_service()
-            try:
-                english_question = translation_service.translate_to_english(question, source_lang=user_lang)
-                print(f"Translated '{question}' -> '{english_question}'")
-            except Exception as e:
-                print(f"Translation failed: {e}, using original text")
-                english_question = question
-        else:
-            english_question = question
-        
-        # Check if this is first message in session
-        conversation = SessionManager.get_or_create_session(session_id)
-        
-        # Update conversation language
-        if not conversation.language or conversation.language == 'en':
-            conversation.language = user_lang
-            db.session.commit()
-        
-        existing_messages = Message.query.filter_by(
-            conversation_id=conversation.id
-        ).count()
-        
-        is_first_message = existing_messages == 0
-        
-        # Handle greetings ONLY for first message
-        simple_greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "greetings", 
-                           "habari", "jambo", "mambo"]  # Added Swahili greetings
-        is_greeting = english_question.lower().strip() in simple_greetings or question.lower().strip() in simple_greetings
-        
-        if is_greeting and is_first_message:
+        english_question = question  # Gemini handles all languages natively
+
+        # Check greeting without blocking DB call
+        simple_greetings = {"hi", "hello", "hey", "good morning", "good afternoon",
+                            "good evening", "greetings", "habari", "jambo", "mambo"}
+        is_greeting = question.lower().strip() in simple_greetings
+
+        if is_greeting:
             from services.multilingual_chat_service import MultilingualChatService
             welcome_message = MultilingualChatService.get_welcome_message(user_lang)
-            
-            # Generate audio for welcome message
             audio_b64 = _generate_audio_b64(welcome_message, user_lang)
-            
             return jsonify({
-                "transcription": {
-                    "text": transcription['text'],
-                    "language": detected_language
-                },
+                "transcription": {"text": transcription['text'], "language": detected_language},
                 "answer": welcome_message,
                 "audio_base64": audio_b64,
-                "suggested_questions": [
-                    "What are the top tourist destinations in Uganda?",
-                    "Tell me about accommodation options",
-                    "What cultural experiences are available?"
-                ]
+                "suggested_questions": []
             }), 200
-        
-        # Skip greeting for subsequent messages - proceed with normal chat
         
         # Get Gemini model and site content
         model = get_gemini_model()
@@ -608,73 +557,56 @@ def voice_chat():
         site_content = get_site_content()
         
         # System prompt
-        system_prompt = f"""You are Nambi, Virtual Travel Assistant for Everything Uganda. You are warm, charming, and knowledgeable.
+        system_prompt = f"""You are Nambi, Virtual Travel Assistant for Everything Uganda. You are warm, fun and quick.
 
-LANGUAGE RULE — THIS IS THE MOST IMPORTANT RULE:
-The user is communicating in: {user_lang}
-You MUST respond in that exact language. If the user speaks Swahili, respond fully in Swahili.
-If they switch to French, respond in French. Never refuse to use the user's language.
-Never say "I don't speak [language]" — always respond in whatever language the user uses.
+LANGUAGE: Respond in {user_lang} only.
 
-CONVERSATION STRUCTURE RULES:
-- Always open your reply by directly acknowledging what the user asked
-- Structure answers in clear short paragraphs, each covering one point
-- Use natural transitions ("Beyond that...", "What makes this special is...", "On top of that...")
-- End every response with one engaging follow-up question or gentle nudge
-- Never use bullet point lists — write in flowing conversational prose
-- Keep responses to 2-3 focused paragraphs maximum
+RESPONSE RULES:
+- ONE short paragraph only — 2-3 sentences max
+- Be direct, warm and conversational — like texting a friend
+- End with a quick follow-up question to keep the chat going
+- No bullet points, no headers, no long explanations
+- Use the company content below to answer accurately
 
-ACTIVITIES YOU KNOW ABOUT:
-Wildlife, Gorilla Trekking, Chimpanzee Tracking, Game Drives, Bird Watching,
-White Water Rafting, Hiking, Mountain Climbing, Cultural Village Visits,
-Agrofarming Tours, Coffee Plantation Visits, Vanilla Farm Tours, Tea Estate Walks,
-Fishing on Lake Victoria, Lake Albert Fishing, Nile Perch Angling, Boat Cruises
-
-CONTENT RULES:
-- Answer ONLY using the company content below
-- Be conversational, friendly, and natural
-- If you cannot find the answer, say so in {user_lang} and suggest visiting https://www.everythinguganda.com
+If you can't find the answer: "I don't have that detail right now, but visit https://www.everythinguganda.com or ask me something else about Uganda!"
 
 COMPANY CONTENT:
-{site_content}
+{site_content[:4000]}
 """
         
-        # Call Gemini
+        # Call Gemini — responds in user's language directly, no translation needed
         full_prompt = system_prompt + f"\n\nUser Question:\n{english_question}"
         response = model.generate_content(full_prompt)
+        translated_response = response.text
         
-        # Translate response to user's language
-        if user_lang != 'en':
-            from services.translation_service import get_translation_service
-            translation_service = get_translation_service()
-            translated_response = translation_service.translate_from_english(response.text, target_lang=user_lang)
-            print(f"Translated response to {user_lang}")
-        else:
-            translated_response = response.text
-        
-        # Store conversation
+        # Store in background — never block the audio response
         if session_id:
-            try:
-                conversation = SessionManager.get_or_create_session(session_id)
-                
-                user_message = Message(
-                    conversation_id=conversation.id,
-                    role='user',
-                    content=question
-                )
-                db.session.add(user_message)
-                
-                bot_message = Message(
-                    conversation_id=conversation.id,
-                    role='bot',
-                    content=translated_response
-                )
-                db.session.add(bot_message)
-                
-                db.session.commit()
-            except Exception as e:
-                print(f"Failed to store conversation: {str(e)}")
-                db.session.rollback()
+            from flask import current_app
+            _app = current_app._get_current_object()
+            _q, _r = question, translated_response
+            def _store_voice():
+                try:
+                    with _app.app_context():
+                        conv = Conversation.query.filter_by(session_id=session_id).first()
+                        if not conv:
+                            conv = Conversation(session_id=session_id, language=user_lang, is_active=True)
+                            db.session.add(conv)
+                            try:
+                                db.session.flush()
+                            except Exception:
+                                db.session.rollback()
+                                conv = Conversation.query.filter_by(session_id=session_id).first()
+                        db.session.add(Message(conversation_id=conv.id, role='user', content=_q))
+                        db.session.add(Message(conversation_id=conv.id, role='bot', content=_r))
+                        db.session.commit()
+                except Exception as e:
+                    print(f"Voice store failed: {e}")
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+            import threading
+            threading.Thread(target=_store_voice, daemon=True).start()
         
         return jsonify({
             'transcription': {
