@@ -11,6 +11,7 @@ from routes.itinerary_builder import itinerary_builder_bp
 from routes.handover import handover_bp
 from routes.multilingual import multilingual_bp
 from routes.voice import voice_bp
+from routes.admin_dashboard import admin_dashboard_bp
 
 
 load_dotenv()
@@ -43,6 +44,7 @@ def create_app():
     app.register_blueprint(handover_bp, url_prefix="/api")
     app.register_blueprint(multilingual_bp, url_prefix="/api")
     app.register_blueprint(voice_bp, url_prefix="/api")
+    app.register_blueprint(admin_dashboard_bp)
 
     # Health check endpoint
     @app.route("/api/health", methods=["GET"])
