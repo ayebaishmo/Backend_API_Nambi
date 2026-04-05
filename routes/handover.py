@@ -97,24 +97,15 @@ def request_human_assistance():
         from services.email_service import EmailService
         EmailService.send_handover_notification(handover)
         
-        # Generate WhatsApp link
-        whatsapp_number = os.getenv('WHATSAPP_NUMBER', '')
-        whatsapp_link = None
-        if whatsapp_number:
-            # Create pre-filled message
-            message_text = f"Hi! I'm interested in booking a trip to Uganda. My reference ID is #{handover.id}"
-            whatsapp_link = f"https://wa.me/{whatsapp_number.replace('+', '').replace(' ', '')}?text={message_text.replace(' ', '%20')}"
-        
         return jsonify({
             "success": True,
             "message": "Your request has been sent to our travel experts! We'll contact you shortly.",
             "handover_id": handover.id,
-            "whatsapp_link": whatsapp_link,
             "email_sent": True,
             "estimated_response_time": "Within 1 hour during business hours",
             "contact_methods": {
                 "email": os.getenv('STAFF_EMAIL'),
-                "whatsapp": whatsapp_number
+                "phone": os.getenv('WHATSAPP_NUMBER')
             }
         }), 200
         

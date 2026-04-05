@@ -145,8 +145,8 @@ class EmailService:
                     </div>
                     
                     <div style="margin-top: 20px; text-align: center;">
-                        <a href="https://wa.me/{booking.phone.replace('+', '').replace(' ', '')}?text=Hi%20{booking.name}!%20Thank%20you%20for%20your%20booking%20request." class="button">
-                            Contact via WhatsApp
+                        <a href="mailto:{booking.email}?subject=Re:%20Your%20Uganda%20Booking%20Request%20%23{booking.id}" class="button">
+                            Reply via Email
                         </a>
                     </div>
                 </div>
@@ -265,8 +265,7 @@ class EmailService:
                     </div>
                     
                     <div style="margin-top: 20px; text-align: center;">
-                        {f'<a href="https://wa.me/{handover.user_phone.replace("+", "").replace(" ", "")}?text=Hi!%20This%20is%20Everything%20Uganda.%20We%20received%20your%20request." class="button">Contact via WhatsApp</a>' if handover.user_phone else ''}
-                        {f'<a href="mailto:{handover.user_email}?subject=Re:%20Your%20Uganda%20Travel%20Request" class="button">Send Email</a>' if handover.user_email else ''}
+                        {f'<a href="mailto:{handover.user_email}?subject=Re:%20Your%20Uganda%20Travel%20Request" class="button">Reply via Email</a>' if handover.user_email else ''}
                     </div>
                 </div>
                 <div class="footer">
@@ -333,8 +332,7 @@ class EmailService:
                     <p>Our travel experts will review your request and contact you within 24 hours to confirm your itinerary and finalize the details.</p>
                     <p>If you have any questions, feel free to reach out to us:</p>
                     <ul>
-                        <li>WhatsApp: {os.getenv('WHATSAPP_NUMBER', '+256773539069')}</li>
-                        <li>Email: {os.getenv('STAFF_EMAIL', 'info@everythinguganda.com')}</li>
+                        <li>Email: {os.getenv('STAFF_EMAIL', 'reservations@everythinguganda.co.uk')}</li>
                     </ul>
                     <p>We look forward to making your Uganda experience unforgettable!</p>
                 </div>
