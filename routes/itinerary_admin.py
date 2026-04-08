@@ -1,6 +1,8 @@
 from flask import Blueprint, request, jsonify
 from extensions import db
 from models.itinerary import Itinerary
+from services.itinerary_validator import ItineraryValidator
+from middleware.auth import require_auth
 
 itinerary_admin_bp = Blueprint("itinerary_admin", __name__, url_prefix="/api/admin/itineraries")
 
@@ -9,19 +11,24 @@ itinerary_admin_bp = Blueprint("itinerary_admin", __name__, url_prefix="/api/adm
 @itinerary_admin_bp.route("/", methods=["POST"])
 def create_itinerary():
     """
-    Create itinerary
+    Create new itinerary (Admin only)
     ---
     tags:
       - Itineraries (Admin)
+    operationId: createItinerary
+    security:
+      - Bearer: []
     parameters:
       - in: body
         name: body
         required: true
+        description: Itinerary data
         schema:
           type: object
           required:
             - title
             - days
+            - budget
             - places
             - accommodation
             - transport
@@ -30,42 +37,70 @@ def create_itinerary():
           properties:
             title:
               type: string
-              example: "3 Days in Kampala"
+              example: "5 Days Uganda Safari"
             days:
               type: integer
-              example: 3
+              example: 5
             budget:
-              type: number
-              example: 500
+              type: string
+              example: "2000"
             places:
               type: string
-              example: "Kampala, Entebbe"
+              example: "Kampala, Murchison Falls"
             accommodation:
               type: string
-              example: "Hotel Africana"
+              example: "Mid-range lodges"
             transport:
               type: string
-              example: "Private car"
+              example: "4x4 Safari Vehicle"
             details:
               type: string
-              example: "Day 1: City tour..."
+              example: "Day 1: Kampala city tour..."
             package_name:
               type: string
               example: "Silver"
     responses:
       201:
-        description: Itinerary created
+        description: Itinerary created successfully
         schema:
           type: object
           properties:
             message:
               type: string
-              example: Itinerary created successfully
             id:
               type: integer
+            warnings:
+              type: array
+              items:
+                type: string
       400:
-        description: Validation error
+        description: Validation failed
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+            errors:
+              type: array
+              items:
+                type: string
+            warnings:
+              type: array
+              items:
+                type: string
+      401:
+        description: Unauthorized
     """
+    # Manual auth check
+    from middleware.auth import verify_token
+    token = request.headers.get('Authorization')
+    if not token:
+        return jsonify({'error': 'Authorization token required'}), 401
+    if token.startswith('Bearer '):
+        token = token[7:]
+    admin_id = verify_token(token)
+    if not admin_id:
+        return jsonify({'error': 'Invalid or expired token'}), 401
 
     data = request.get_json() or {}
 
@@ -73,6 +108,17 @@ def create_itinerary():
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Missing required fields"}), 400
 
+    # Validate itinerary data
+    validation_result = ItineraryValidator.validate_complete_itinerary(data)
+    
+    if not validation_result['valid']:
+        return jsonify({
+            "error": "Validation failed",
+            "errors": validation_result['errors'],
+            "warnings": validation_result['warnings']
+        }), 400
+    
+    # Create itinerary
     itinerary = Itinerary(
         title=data["title"],
         days=data["days"],
@@ -87,7 +133,16 @@ def create_itinerary():
     db.session.add(itinerary)
     db.session.commit()
 
-    return jsonify({"message": "Itinerary created successfully", "id": itinerary.id}), 201
+    response_data = {
+        "message": "Itinerary created successfully",
+        "id": itinerary.id
+    }
+    
+    # Include warnings if any
+    if validation_result['warnings']:
+        response_data['warnings'] = validation_result['warnings']
+
+    return jsonify(response_data), 201
 
 
 # ---------------- GET ALL ----------------
@@ -98,6 +153,7 @@ def get_itineraries():
     ---
     tags:
       - Itineraries (Admin)
+    operationId: getAllItineraries
     responses:
       200:
         description: List of itineraries
@@ -210,6 +266,7 @@ def get_itinerary(id):
 
 # ---------------- UPDATE ----------------
 @itinerary_admin_bp.route("/<int:id>", methods=["PUT"])
+@require_auth
 def update_itinerary(id):
     """
     Update itinerary
@@ -261,6 +318,25 @@ def update_itinerary(id):
     itinerary = Itinerary.query.get_or_404(id)
     data = request.get_json() or {}
 
+    # Prepare updated data for validation
+    updated_data = {
+        'days': data.get('days', itinerary.days),
+        'budget': data.get('budget', itinerary.budget),
+        'places': data.get('places', itinerary.places),
+        'start_date': data.get('start_date')
+    }
+    
+    # Validate updated data
+    validation_result = ItineraryValidator.validate_complete_itinerary(updated_data)
+    
+    if not validation_result['valid']:
+        return jsonify({
+            "error": "Validation failed",
+            "errors": validation_result['errors'],
+            "warnings": validation_result['warnings']
+        }), 400
+
+    # Update itinerary
     itinerary.title = data.get("title", itinerary.title)
     itinerary.days = data.get("days", itinerary.days)
     itinerary.budget = data.get("budget", itinerary.budget)
@@ -272,11 +348,18 @@ def update_itinerary(id):
 
     db.session.commit()
 
-    return jsonify({"message": "Itinerary updated successfully"}), 200
+    response_data = {"message": "Itinerary updated successfully"}
+    
+    # Include warnings if any
+    if validation_result['warnings']:
+        response_data['warnings'] = validation_result['warnings']
+
+    return jsonify(response_data), 200
 
 
 # ---------------- DELETE ----------------
 @itinerary_admin_bp.route("/<int:id>", methods=["DELETE"])
+@require_auth
 def delete_itinerary(id):
     """
     Delete itinerary
