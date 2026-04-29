@@ -33,10 +33,14 @@ def fetch_full_site(start_url="https://www.everythinguganda.com/"):
 
 
 def _playwright_fetch(urls):
-    """Run Playwright in a dedicated ProactorEventLoop thread."""
+    """Run Playwright in a dedicated thread — Linux/Windows safe."""
     def run():
         import asyncio
-        loop = asyncio.ProactorEventLoop()
+        # ProactorEventLoop is Windows-only — use SelectorEventLoop on Linux
+        try:
+            loop = asyncio.ProactorEventLoop()
+        except AttributeError:
+            loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             return loop.run_until_complete(_scrape(urls))

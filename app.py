@@ -26,10 +26,10 @@ def create_app():
     
     cors.init_app(
         app,
-        origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        origins="*",
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "Cache-Control", "X-Requested-With", "Pragma"],
-        supports_credentials=True
+        supports_credentials=False
     )
 
     # Initialize other extensions
