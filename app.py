@@ -12,6 +12,9 @@ from routes.handover import handover_bp
 from routes.multilingual import multilingual_bp
 from routes.voice import voice_bp
 from routes.admin_dashboard import admin_dashboard_bp
+from logger import get_logger
+
+log = get_logger("app")
 
 
 load_dotenv()
@@ -64,14 +67,39 @@ def create_app():
             "version": "1.0.0"
         }), 200
 
+    # Request/response logging
+    from flask import g, request
+    import time
+
+    @app.before_request
+    def _log_request():
+        g.start_time = time.time()
+        log.info(f"→ {request.method} {request.path} | IP={request.remote_addr}")
+
+    @app.after_request
+    def _log_response(response):
+        elapsed = (time.time() - getattr(g, 'start_time', time.time())) * 1000
+        log.info(f"← {response.status_code} {request.path} | {elapsed:.0f}ms")
+        return response
+
+    @app.teardown_request
+    def _log_error(exc):
+        if exc:
+            from flask import request as req
+            log.error(f"Request error on {req.path}: {exc}", exc_info=True)
+
     return app
 
 app = create_app()
 
-# Fetch site content before starting the server
+# Load site content in background thread — Flask starts immediately
 with app.app_context():
-    from routes.chat import load_site_content
-    load_site_content()
+    def _bg_load():
+        from routes.chat import load_site_content
+        load_site_content()
+    import threading
+    threading.Thread(target=_bg_load, daemon=True).start()
+    print("Site content loading in background...")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -11,6 +11,9 @@ import os
 
 voice_bp = Blueprint("voice", __name__)
 
+# TTS audio cache — avoids regenerating identical audio on repeated calls
+_tts_cache = {}
+
 # Allowed audio file extensions
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'm4a', 'ogg', 'flac', 'webm'}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
@@ -372,6 +375,17 @@ def text_to_speech():
         if not text:
             return jsonify({'error': 'text is empty after processing'}), 400
 
+        # Cache key — same text+voice returns cached audio instantly
+        import hashlib
+        cache_key = hashlib.md5(f"{text}:{language}:{requested_voice}".encode()).hexdigest()
+        if cache_key in _tts_cache:
+            from flask import Response
+            return Response(
+                _tts_cache[cache_key],
+                mimetype="audio/mpeg",
+                headers={"Content-Disposition": "inline; filename=speech.mp3"}
+            )
+
         # Map language codes to best neural voices
         language_voice_map = {
             'en': 'en-GB-SoniaNeural',      # warm, elegant British female - Nambi's voice
@@ -394,7 +408,6 @@ def text_to_speech():
         voice = requested_voice or language_voice_map.get(language, 'en-GB-SoniaNeural')
 
         import edge_tts
-        from flask import Response
 
         async def generate(v):
             communicate = edge_tts.Communicate(text, v)
@@ -409,6 +422,12 @@ def text_to_speech():
         except Exception:
             audio_bytes = _run_async(generate('en-GB-SoniaNeural'))
 
+        # Cache for future identical requests (max 50 entries)
+        if len(_tts_cache) > 50:
+            _tts_cache.pop(next(iter(_tts_cache)))
+        _tts_cache[cache_key] = audio_bytes
+
+        from flask import Response
         return Response(
             audio_bytes,
             mimetype="audio/mpeg",
@@ -561,17 +580,18 @@ def voice_chat():
 
 LANGUAGE: Respond in {user_lang} only.
 
-RESPONSE RULES:
-- ONE short paragraph only — 2-3 sentences max
-- Be direct, warm and conversational — like texting a friend
-- End with a quick follow-up question to keep the chat going
-- No bullet points, no headers, no long explanations
-- Use the company content below to answer accurately
+CRITICAL: The company content below is scraped LIVE from www.everythinguganda.com.
+Search ALL of it thoroughly before saying you don't have information.
+NEVER say "I don't have that detail" if the topic is Uganda tourism.
 
-If you can't find the answer: "I don't have that detail right now, but visit https://www.everythinguganda.com or ask me something else about Uganda!"
+RESPONSE RULES:
+- ONE short paragraph — 2-3 sentences max
+- Direct, warm, conversational
+- End with a follow-up question
+- No bullet points, no headers
 
 COMPANY CONTENT:
-{site_content[:4000]}
+{site_content[:30000] if site_content else ""}
 """
         
         # Call Gemini — responds in user's language directly, no translation needed
