@@ -9,8 +9,10 @@ from extensions import db
 from models.conversation import Conversation
 from models.message import Message
 from models.feedback import Feedback
+from logger import get_logger
 import threading
 
+log = get_logger("chat")
 chat_bp = Blueprint("chat", __name__)
 
 # Global variable to store site content
@@ -21,30 +23,30 @@ _loading_lock = threading.Lock()
 
 
 def load_site_content():
-    """Load site content at startup"""
+    """Load site content in background thread — doesn't block Flask startup"""
     global _site_content, _content_loaded
-    
+
     with _loading_lock:
         if _content_loaded:
             return _site_content
-            
+
         try:
             _site_content = fetch_full_site("https://www.everythinguganda.com/")
             _content_loaded = True
+            print(f"Site content loaded: {len(_site_content):,} chars")
         except Exception as e:
-            print(f"ERROR: Failed to fetch site content - {type(e).__name__}: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"ERROR: Failed to fetch site content: {e}")
             _site_content = ""
             _content_loaded = True
-    
+
     return _site_content
+
 
 def get_site_content():
     """Get cached site content"""
     global _site_content, _content_loaded
     if not _content_loaded:
-        return load_site_content()
+        load_site_content()
     return _site_content if _site_content else ""
 
 
@@ -142,14 +144,18 @@ def chat():
     try:
         data = request.get_json()
         if not data:
+            log.warning("Chat request with no body")
             return jsonify({"error": "Invalid request body"}), 400
-        
+
         question = data.get("question", "").strip()
         session_id = data.get("session_id")
+
+        log.info(f"CHAT | session={session_id} | q='{question[:100]}'")
 
         # Fast in-memory language detection — zero DB, zero network
         user_language = _fast_detect_language(question, session_id)
         english_question = question  # Gemini handles all languages natively
+        log.debug(f"Language: {user_language}")
 
         # Multilingual static responses
         _suggested_questions = {
@@ -226,18 +232,96 @@ def chat():
                 "quick_replies": []
             })
 
-        # Handle booking intent
-        booking_keywords = ["yes please", "yes", "book", "booking", "reserve", "reservation", "i want to book", "how do i book", "book now",
-                            "hifadhi", "weka", "ninataka kuhifadhi", "réserver", "reservar", "buchen", "prenotare"]
-        if any(keyword in question.lower() for keyword in booking_keywords):
+        # ── INTENT DETECTION ─────────────────────────────────────────────────
+        q = question.lower().strip()
+
+        # Booking intent
+        booking_keywords = [
+            "book", "booking", "reserve", "reservation", "i want to book",
+            "how do i book", "book now", "yes please", "make a booking",
+            "hifadhi", "weka", "ninataka kuhifadhi", "réserver", "reservar",
+            "buchen", "prenotare", "i want to travel", "plan a trip"
+        ]
+        # Itinerary intent
+        itinerary_keywords = [
+            "itinerary", "build itinerary", "create itinerary", "plan itinerary",
+            "trip plan", "travel plan", "day by day", "schedule", "build a trip",
+            "plan my trip", "create a plan", "safari plan", "tengeneza ratiba",
+            "ratiba", "mpango wa safari"
+        ]
+        # Human handover intent
+        human_keywords = [
+            "speak to human", "talk to someone", "real person", "human agent",
+            "speak to agent", "contact staff", "call me", "whatsapp",
+            "speak to a person", "i need help", "agent", "representative",
+            "niongee na mtu", "msaada wa mtu"
+        ]
+        # Voice intent
+        voice_keywords = [
+            "voice", "speak", "talk", "audio", "listen", "microphone",
+            "record", "voice chat", "speak to nambi"
+        ]
+
+        if any(k in q for k in itinerary_keywords):
+            return jsonify({
+                "answer": get_lang_response({
+                    'en': "Let's build your perfect Uganda itinerary! Tap the map icon or the itinerary button to get started.",
+                    'sw': "Tuunde ratiba yako ya Uganda! Bonyeza kitufe cha ramani au ratiba kuanza.",
+                    'fr': "Construisons votre itinéraire parfait en Ouganda! Appuyez sur l'icône carte pour commencer.",
+                    'de': "Lassen Sie uns Ihre perfekte Uganda-Reiseroute erstellen! Tippen Sie auf das Karten-Symbol.",
+                    'es': "¡Construyamos tu itinerario perfecto en Uganda! Toca el ícono del mapa para comenzar.",
+                }, user_language),
+                "action": "open_itinerary",
+                "suggested_questions": [],
+                "action_buttons": [{"label": "Build My Itinerary", "action": "open_itinerary"}],
+                "booking_buttons": [],
+                "show_booking_prompt": False,
+                "images": [], "quick_replies": []
+            })
+
+        if any(k in q for k in human_keywords):
+            return jsonify({
+                "answer": get_lang_response({
+                    'en': "I'll connect you with one of our travel experts right away! Tap the person icon or the button below.",
+                    'sw': "Nitakuunganisha na mtaalamu wetu wa usafiri! Bonyeza kitufe cha mtu.",
+                    'fr': "Je vous mets en contact avec un expert voyage! Appuyez sur l'icône personne.",
+                    'de': "Ich verbinde Sie sofort mit einem Reiseexperten! Tippen Sie auf das Personen-Symbol.",
+                    'es': "¡Te conecto con un experto en viajes ahora mismo! Toca el ícono de persona.",
+                }, user_language),
+                "action": "open_handover",
+                "suggested_questions": [],
+                "action_buttons": [{"label": "Talk to a Human", "action": "open_handover"}],
+                "booking_buttons": [],
+                "show_booking_prompt": False,
+                "images": [], "quick_replies": []
+            })
+
+        if any(k in q for k in booking_keywords):
             return jsonify({
                 "answer": get_lang_response(_booking_answers, user_language),
+                "action": "open_booking",
                 "suggested_questions": get_lang_response(_booking_questions, user_language),
-                "action_buttons": [],
+                "action_buttons": [{"label": "Book Now", "action": "open_booking"}],
                 "booking_buttons": [],
                 "show_booking_prompt": True,
-                "images": [],
-                "quick_replies": []
+                "images": [], "quick_replies": []
+            })
+
+        if any(k in q for k in voice_keywords):
+            return jsonify({
+                "answer": get_lang_response({
+                    'en': "You can talk to me using the mic button! Tap it to start recording your question.",
+                    'sw': "Unaweza kuniambia kwa kutumia kitufe cha maikrofoni! Bonyeza kuanza kurekodi.",
+                    'fr': "Vous pouvez me parler en utilisant le bouton micro! Appuyez pour commencer.",
+                    'de': "Sie können mit mir über den Mikrofon-Button sprechen! Tippen Sie zum Starten.",
+                    'es': "¡Puedes hablarme usando el botón del micrófono! Tócalo para empezar.",
+                }, user_language),
+                "action": "open_voice",
+                "suggested_questions": [],
+                "action_buttons": [{"label": "Start Voice Chat", "action": "open_voice"}],
+                "booking_buttons": [],
+                "show_booking_prompt": False,
+                "images": [], "quick_replies": []
             })
 
         # Get Gemini model
@@ -258,23 +342,23 @@ def chat():
             except FileNotFoundError:
                 return jsonify({"error": "Content not available. Please try again later."}), 503
 
-        # Trim to 4000 chars — pre-sliced at module level would be faster
-        # but content loads async so we slice here
-        site_content_trimmed = site_content[:4000] if site_content else ""
+        # Send enough content for Gemini to find answers — 238k chars scraped, send 30k
+        site_content_trimmed = site_content[:30000] if site_content else ""
 
         # System prompt
         system_prompt = f"""You are Nambi, Virtual Travel Assistant for Everything Uganda. You are warm, fun and quick.
 
 LANGUAGE: Respond in {user_language} only.
 
-RESPONSE RULES:
-- ONE short paragraph only — 2-3 sentences max
-- Be direct, warm and conversational — like texting a friend
-- End with a quick follow-up question to keep the chat going
-- No bullet points, no headers, no long explanations
-- Use the company content below to answer accurately
+CRITICAL: The company content below is scraped LIVE from www.everythinguganda.com. 
+Search ALL of it thoroughly before saying you don't have information.
+NEVER say "I don't have that detail" if the topic is Uganda tourism — you always know about Uganda.
 
-If you can't find the answer: "I don't have that detail right now, but visit https://www.everythinguganda.com or ask me something else about Uganda!"
+RESPONSE RULES:
+- ONE short paragraph — 2-3 sentences max
+- Direct, warm, conversational
+- End with a follow-up question
+- No bullet points, no headers
 
 COMPANY CONTENT:
 {site_content_trimmed}
@@ -282,8 +366,40 @@ COMPANY CONTENT:
 
         full_prompt = system_prompt + f"\n\nUser: {english_question}"
 
-        # Call Gemini
-        response = model.generate_content(full_prompt)
+        # Call Gemini with silent retry on rate limit
+        import time
+        t0 = time.time()
+        log.info(f"Calling Gemini | lang={user_language} | content_len={len(site_content_trimmed)}")
+        
+        last_error = None
+        response = None
+        for wait in [0, 5, 10, 20]:  # retry up to 4 times with increasing waits
+            if wait > 0:
+                log.warning(f"Gemini rate limit — waiting {wait}s before retry...")
+                time.sleep(wait)
+            try:
+                response = model.generate_content(full_prompt)
+                break
+            except Exception as e:
+                err = str(e)
+                last_error = err
+                if '429' in err or 'RESOURCE_EXHAUSTED' in err:
+                    log.warning(f"Gemini 429 on attempt (wait={wait}s): {err[:100]}")
+                    continue
+                log.error(f"Gemini error: {err}")
+                raise
+
+        if response is None:
+            log.error(f"Gemini failed after all retries: {last_error}")
+            return jsonify({
+                "answer": "I'm having a brief connection issue — please send your message again!",
+                "suggested_questions": [],
+                "action_buttons": [], "booking_buttons": [],
+                "show_booking_prompt": False, "images": [], "quick_replies": []
+            }), 200
+
+        elapsed = time.time() - t0
+        log.info(f"Gemini responded in {elapsed:.2f}s | answer='{response.text[:80]}'")
         translated_response = response.text
 
         # Store conversation in background — never block the response
@@ -294,14 +410,9 @@ COMPANY CONTENT:
             def _store():
                 try:
                     with _app.app_context():
-                        # Use merge/upsert pattern to avoid UniqueViolation
                         conv = Conversation.query.filter_by(session_id=session_id).first()
                         if not conv:
-                            conv = Conversation(
-                                session_id=session_id,
-                                language=user_language,
-                                is_active=True
-                            )
+                            conv = Conversation(session_id=session_id, language=user_language, is_active=True)
                             db.session.add(conv)
                             try:
                                 db.session.flush()
@@ -311,8 +422,9 @@ COMPANY CONTENT:
                         db.session.add(Message(conversation_id=conv.id, role='user', content=_q))
                         db.session.add(Message(conversation_id=conv.id, role='bot', content=_r))
                         db.session.commit()
+                        log.debug(f"Stored conversation for session={session_id}")
                 except Exception as e:
-                    print(f"Background store failed: {e}")
+                    log.error(f"Background store failed: {e}")
                     try:
                         db.session.rollback()
                     except Exception:
@@ -335,10 +447,16 @@ COMPANY CONTENT:
     except ConnectionError as e:
         return jsonify({"error": "Failed to connect to AI service"}), 503
     except Exception as e:
-        print(f"Error in chat endpoint: {str(e)}")
-        return jsonify({
-            "error": "An unexpected error occurred. Please try again later."
-        }), 500
+        err = str(e)
+        log.error(f"Chat endpoint error: {err}", exc_info=True)
+        if '429' in err or 'RESOURCE_EXHAUSTED' in err:
+            return jsonify({
+                "answer": "Nambi is taking a short breather — please try again in a few seconds!",
+                "suggested_questions": [],
+                "action_buttons": [], "booking_buttons": [],
+                "show_booking_prompt": False, "images": [], "quick_replies": []
+            }), 200
+        return jsonify({"error": "An unexpected error occurred. Please try again later."}), 500
 
 
 @chat_bp.route("/debug/content", methods=["GET"])

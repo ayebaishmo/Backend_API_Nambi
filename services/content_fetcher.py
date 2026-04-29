@@ -1,16 +1,10 @@
-
 """
-Content Fetcher — tries three methods in order:
-1. Scrapy full site crawl (recursive, gets everything)
-2. Playwright (JS-rendered pages)
-3. Requests + BeautifulSoup (plain HTTP, always works)
+Content Fetcher for everythinguganda.com (Next.js/React site)
+Uses Playwright with a single persistent browser session.
 """
 
-import json
 import os
-import tempfile
-from urllib.parse import urlparse, urljoin
-
+import concurrent.futures
 
 SITE_URLS = [
     "https://www.everythinguganda.com/",
@@ -29,227 +23,132 @@ SITE_URLS = [
 
 
 def fetch_full_site(start_url="https://www.everythinguganda.com/"):
-    """
-    Try Scrapy first, fall back to Playwright, then requests+BS4.
-    """
-    print("Attempting Scrapy full site crawl...")
-    result = _scrapy_crawl(start_url)
-    if result:
-        return result
-
-    print("Scrapy failed, trying Playwright...")
+    print("Starting Playwright site scrape...")
     result = _playwright_fetch(SITE_URLS)
-    if result:
+    if result and len(result) > 1000:
+        print(f"Scrape complete: {len(result):,} chars")
         return result
+    print(f"Playwright got {len(result) if result else 0} chars — insufficient")
+    return result or ""
 
-    print("Playwright failed, using requests+BeautifulSoup...")
-    return _requests_fetch(SITE_URLS)
-
-
-# ── METHOD 1: Scrapy ──────────────────────────────────────────────────────────
-
-def _scrapy_crawl(start_url):
-    try:
-        import scrapy
-        from scrapy.crawler import CrawlerProcess
-        from scrapy.utils.log import configure_logging
-
-        # Use a fixed path with forward slashes — Windows-safe for Scrapy
-        output_file = os.path.join(tempfile.gettempdir(), "nambi_scrapy_out.json")
-        output_file_uri = output_file.replace("\\", "/")
-
-        # Remove stale output file
-        if os.path.exists(output_file):
-            os.unlink(output_file)
-
-        configure_logging(install_root_handler=False)
-        domain = urlparse(start_url).netloc
-
-        class FullSiteSpider(scrapy.Spider):
-            name = "fullsite"
-            start_urls = [start_url]
-            allowed_domains = [domain]
-            custom_settings = {
-                "FEEDS": {output_file_uri: {"format": "json", "overwrite": True}},
-                "LOG_ENABLED": False,
-                "ROBOTSTXT_OBEY": True,
-                "CONCURRENT_REQUESTS": 8,
-                "DOWNLOAD_DELAY": 0.3,
-                "DEPTH_LIMIT": 4,
-                "CLOSESPIDER_PAGECOUNT": 150,
-                "USER_AGENT": "Mozilla/5.0 (compatible; NambiBot/1.0)",
-                "HTTPERROR_ALLOW_ALL": True,
-            }
-
-            def parse(self, response):
-                text = " ".join(response.css(
-                    "p::text, h1::text, h2::text, h3::text, h4::text, "
-                    "li::text, td::text, th::text, span::text, a::text"
-                ).getall()).strip()
-
-                if text and len(text) > 50:
-                    yield {"url": response.url, "text": text}
-
-                for link in response.css("a::attr(href)").getall():
-                    yield response.follow(link, self.parse)
-
-        process = CrawlerProcess()
-        process.crawl(FullSiteSpider)
-        process.start()
-
-        if not os.path.exists(output_file):
-            print("Scrapy: output file not created")
-            return None
-
-        with open(output_file, "r", encoding="utf-8") as f:
-            pages = json.load(f)
-
-        os.unlink(output_file)
-
-        if not pages:
-            print("Scrapy: crawled but extracted no text")
-            return None
-
-        all_text = []
-        for page in pages:
-            all_text.append(f"\n--- CONTENT FROM {page['url']} ---\n")
-            all_text.append(page.get("text", ""))
-
-        result = "\n".join(all_text)
-        print(f"Scrapy crawl complete: {len(pages)} pages, {len(result):,} chars")
-        return result
-
-    except Exception as e:
-        print(f"Scrapy error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-
-# ── METHOD 2: Playwright ──────────────────────────────────────────────────────
 
 def _playwright_fetch(urls):
-    """Run Playwright in a separate thread with ProactorEventLoop (Windows-safe)."""
-    import concurrent.futures
-
+    """Run Playwright in a dedicated ProactorEventLoop thread."""
     def run():
         import asyncio
-        # ProactorEventLoop is required on Windows for subprocess (Playwright)
         loop = asyncio.ProactorEventLoop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(_playwright_async(urls))
+            return loop.run_until_complete(_scrape(urls))
         finally:
             loop.close()
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            result = pool.submit(run).result(timeout=300)  # 5 min for all URLs
-        return result
+            return pool.submit(run).result(timeout=600)
     except Exception as e:
-        print(f"Playwright thread error: {e}")
+        print(f"Playwright fetch error: {e}")
         import traceback
         traceback.print_exc()
         return None
 
 
-async def _playwright_async(urls):
-    """Async Playwright fetch — runs inside ProactorEventLoop thread."""
-    try:
-        from playwright.async_api import async_playwright
-        all_text = []
+async def _scrape(urls):
+    from playwright.async_api import async_playwright
 
-        async with async_playwright() as p:
-            for url in urls:
-                # Launch a fresh browser per URL — avoids crash cascade
-                browser = None
-                try:
-                    print(f"Playwright fetching: {url}")
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        args=["--no-sandbox", "--disable-dev-shm-usage",
-                              "--disable-gpu", "--disable-extensions"]
-                    )
-                    page = await browser.new_page()
-                    # domcontentloaded is faster than networkidle for JS sites
-                    await page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                    # Give JS a moment to render
-                    await page.wait_for_timeout(3000)
-                    content = await page.inner_text("body")
-                    await browser.close()
+    all_text = []
 
-                    if content and len(content) > 100:
-                        all_text.append(f"\n--- CONTENT FROM {url} ---\n")
-                        all_text.append(content)
-                        print(f"  Got {len(content):,} chars")
-                    else:
-                        print(f"  Got {len(content) if content else 0} chars (skipped)")
+    async with async_playwright() as p:
+        # Single browser for all URLs — avoids repeated launch overhead
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-web-security",
+                "--disable-features=VizDisplayCompositor",
+                "--disable-extensions",
+                "--no-first-run",
+            ]
+        )
 
-                except Exception as e:
-                    print(f"Playwright failed for {url}: {e}")
-                    if browser:
-                        try:
-                            await browser.close()
-                        except Exception:
-                            pass
-
-        if not all_text:
-            return None
-
-        result = "\n".join(all_text)
-        print(f"Playwright complete: {len(urls)} URLs, {len(result):,} chars")
-        return result
-
-    except Exception as e:
-        print(f"Playwright async error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-
-# ── METHOD 3: Requests + BeautifulSoup (always works) ────────────────────────
-
-def _requests_fetch(urls):
-    try:
-        import requests
-        from bs4 import BeautifulSoup
-
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; NambiBot/1.0)"}
-        all_text = []
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+            ignore_https_errors=True,
+        )
 
         for url in urls:
+            page = None
             try:
-                print(f"Requests fetching: {url}")
-                resp = requests.get(url, headers=headers, timeout=15)
-                resp.raise_for_status()
-                soup = BeautifulSoup(resp.text, "html.parser")
+                print(f"Fetching: {url}")
+                page = await context.new_page()
 
-                # Remove scripts and styles
-                for tag in soup(["script", "style", "nav", "footer"]):
-                    tag.decompose()
+                # Use 'load' — faster than networkidle, works on Next.js
+                await page.goto(url, timeout=90000, wait_until="load")
 
-                text = soup.get_text(separator=" ", strip=True)
-                if text:
-                    all_text.append(f"\n--- CONTENT FROM {url} ---\n")
-                    all_text.append(text)
-                    print(f"  Got {len(text):,} chars")
+                # Wait for React to hydrate
+                await page.wait_for_timeout(5000)
+
+                # Extract all meaningful text via JS
+                content = await page.evaluate("""() => {
+                    // Remove noise elements
+                    ['script','style','noscript','nav','footer','header',
+                     'iframe','svg','img'].forEach(tag => {
+                        document.querySelectorAll(tag).forEach(el => el.remove());
+                    });
+
+                    // Collect text from content elements
+                    const tags = ['h1','h2','h3','h4','h5','p','li',
+                                  'td','th','span','div','article',
+                                  'section','main','blockquote'];
+                    const seen = new Set();
+                    const lines = [];
+
+                    tags.forEach(tag => {
+                        document.querySelectorAll(tag).forEach(el => {
+                            const t = (el.innerText || '').trim();
+                            if (t.length > 15 && !seen.has(t)) {
+                                seen.add(t);
+                                lines.push(t);
+                            }
+                        });
+                    });
+                    return lines.join('\\n');
+                }""")
+
+                await page.close()
+
+                if content and len(content) > 100:
+                    all_text.append(f"\n--- CONTENT FROM {url} ---\n{content}")
+                    print(f"  Got {len(content):,} chars")
+                else:
+                    print(f"  Only {len(content) if content else 0} chars")
+
             except Exception as e:
-                print(f"Requests failed for {url}: {e}")
+                print(f"  Failed {url}: {e}")
+                if page:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
 
-        result = "\n".join(all_text)
-        print(f"Requests complete: {len(result):,} chars total")
-        return result
+        await browser.close()
 
-    except Exception as e:
-        print(f"Requests+BS4 error: {e}")
-        return ""
+    if not all_text:
+        return None
+
+    return "\n".join(all_text)
 
 
-# ── Legacy helpers (kept for compatibility) ───────────────────────────────────
-
+# Legacy compatibility
 def fetch_page(url):
-    return _requests_fetch([url])
-
+    return _playwright_fetch([url]) or ""
 
 def fetch_multiple_pages(urls):
-    return _requests_fetch(urls)
+    return _playwright_fetch(urls) or ""
